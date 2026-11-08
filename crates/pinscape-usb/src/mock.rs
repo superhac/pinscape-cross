@@ -17,7 +17,9 @@ use crate::{Error, Result, Transport};
 
 mod buttons;
 mod ir;
+mod nudge;
 mod outputs;
+mod plunger;
 
 /// Simulated device state, shared between the transport and the test.
 #[derive(Debug, Clone)]
@@ -47,6 +49,8 @@ pub struct MockState {
     pub buttons: buttons::State,
     pub outputs: outputs::State,
     pub ir: ir::State,
+    pub nudge: nudge::State,
+    pub plunger: plunger::State,
 }
 
 impl Default for MockState {
@@ -70,6 +74,8 @@ impl Default for MockState {
             buttons: Default::default(),
             outputs: Default::default(),
             ir: Default::default(),
+            nudge: Default::default(),
+            plunger: Default::default(),
         }
     }
 }
@@ -249,6 +255,8 @@ impl MockDevice {
             cmd::BUTTONS => buttons::handle(self, t, c, a, xfer),
             cmd::OUTPUTS => outputs::handle(self, t, c, a, xfer),
             cmd::QUERY_IR | cmd::SEND_IR | cmd::TVON => ir::handle(self, t, c, a, xfer),
+            cmd::NUDGE => nudge::handle(self, t, c, a, xfer),
+            cmd::PLUNGER => plunger::handle(self, t, c, a, xfer),
             cmd::RESET => {
                 let mut st = self.state.lock().unwrap();
                 st.last_reset = Some(arg(0));

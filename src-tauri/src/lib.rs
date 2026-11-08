@@ -6,8 +6,11 @@
 
 mod buttons;
 mod files;
+mod firmware;
 mod ir;
+mod nudge;
 mod outputs;
+mod plunger;
 mod session;
 
 use pinscape_protocol::{config, reset, GpioPort, Statistics, UsbInterfaces};
@@ -202,6 +205,7 @@ pub fn run() {
         .setup(|app| {
             let mgr = Manager::start(app.handle().clone());
             app.manage(mgr);
+            app.manage(firmware::Firmware::start(app.handle().clone()));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -242,6 +246,30 @@ pub fn run() {
             ir::ir_config_status,
             ir::ir_parse_code,
             ir::ir_protocols,
+            nudge::nudge_status,
+            nudge::nudge_params,
+            nudge::nudge_put_params,
+            nudge::nudge_commit,
+            nudge::nudge_revert,
+            nudge::nudge_center,
+            nudge::nudge_calibrate,
+            plunger::plunger_config,
+            plunger::plunger_reading,
+            plunger::plunger_calibrate,
+            plunger::plunger_set_jitter_filter,
+            plunger::plunger_set_firing_time_limit,
+            plunger::plunger_set_integration_time,
+            plunger::plunger_set_orientation,
+            plunger::plunger_set_scaling_factor,
+            plunger::plunger_set_scan_mode,
+            plunger::plunger_set_calibration,
+            plunger::plunger_commit,
+            plunger::plunger_revert,
+            plunger::plunger_restore_defaults,
+            firmware::firmware_inspect,
+            firmware::firmware_install,
+            firmware::bootloader_list,
+            firmware::bootloader_reboot,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

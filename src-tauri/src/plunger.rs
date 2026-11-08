@@ -1,0 +1,155 @@
+//! Plunger commands (CMD_PLUNGER 0x0F): plunger configuration, live
+//! readings (incl. image-sensor pixels), calibration, settings,
+//! commit/revert.
+//!
+//! The setters change the Pico's in-memory settings only; `plunger_commit`
+//! saves them (and the calibration) to flash, `plunger_revert` reloads the
+//! saved ones.
+
+use pinscape_protocol::plunger::{PlungerCal, PlungerConfig, PlungerReading, SensorData};
+use tauri::State;
+
+use crate::session::Manager;
+
+type Res<T> = Result<T, String>;
+
+/// Largest manual scaling factor the UI may set, percent.
+const MAX_SCALING_PCT: u32 = 1000;
+
+#[tauri::command]
+pub async fn plunger_config(mgr: State<'_, Manager>, key: String) -> Res<PlungerConfig> {
+    mgr.run(&key, |c| c.query_plunger_config()).await
+}
+
+/// Live reading. Image-sensor snapshots are large (one byte per pixel), so
+/// the pixel array is only included when `pixels` is true.
+#[tauri::command]
+pub async fn plunger_reading(mgr: State<'_, Manager>, key: String, pixels: bool) -> Res<PlungerReading> {
+    mgr.run(&key, move |c| {
+        let mut r = c.query_plunger_reading()?;
+        if !pixels {
+            if let Some(SensorData::ImageSensor { pixels, .. }) = r.sensor.as_mut() {
+                pixels.clear();
+            }
+        }
+        Ok(r)
+    })
+    .await
+}
+
+/// Start the timed calibration (about 15 s). With `auto_save`, the result is
+/// saved to flash when it ends.
+#[tauri::command]
+pub async fn plunger_calibrate(mgr: State<'_, Manager>, key: String, auto_save: bool) -> Res<()> {
+    mgr.run(&key, move |c| c.start_plunger_calibration(auto_save)).await
+}
+
+#[tauri::command]
+pub async fn plunger_set_jitter_filter(mgr: State<'_, Manager>, key: String, window: u16) -> Res<()> {
+    mgr.run(&key, move |c| c.set_plunger_jitter_filter(window)).await
+}
+
+/// Firing time limit in microseconds (0 = firmware default).
+#[tauri::command]
+pub async fn plunger_set_firing_time_limit(mgr: State<'_, Manager>, key: String, us: u32) -> Res<()> {
+    mgr.run(&key, move |c| c.set_plunger_firing_time_limit(us)).await
+}
+
+/// Integration time in microseconds (0 = sensor default); imaging sensors only.
+#[tauri::command]
+pub async fn plunger_set_integration_time(mgr: State<'_, Manager>, key: String, us: u32) -> Res<()> {
+    mgr.run(&key, move |c| c.set_plunger_integration_time(us)).await
+}
+
+#[tauri::command]
+pub async fn plunger_set_orientation(mgr: State<'_, Manager>, key: String, reverse: bool) -> Res<()> {
+    mgr.run(&key, move |c| c.set_plunger_orientation(reverse)).await
+}
+
+/// Manual scaling factor, percent (1..=1000; 100 = calibrated range unchanged).
+#[tauri::command]
+pub async fn plunger_set_scaling_factor(mgr: State<'_, Manager>, key: String, percent: u32) -> Res<()> {
+    if percent == 0 || percent > MAX_SCALING_PCT {
+        return Err(format!("scaling factor must be 1-{MAX_SCALING_PCT}%"));
+    }
+    mgr.run(&key, move |c| c.set_plunger_scaling_factor(percent)).await
+}
+
+#[tauri::command]
+pub async fn plunger_set_scan_mode(mgr: State<'_, Manager>, key: String, mode: u8) -> Res<()> {
+    mgr.run(&key, move |c| c.set_plunger_scan_mode(mode)).await
+}
+
+/// Put calibration data (e.g. saved earlier from a reading) into effect, in memory only.
+#[tauri::command]
+pub async fn plunger_set_calibration(mgr: State<'_, Manager>, key: String, cal: PlungerCal) -> Res<()> {
+    mgr.run(&key, move |c| c.set_plunger_calibration(&cal)).await
+}
+
+/// Save the live settings and calibration to flash.
+#[tauri::command]
+pub async fn plunger_commit(mgr: State<'_, Manager>, key: String) -> Res<()> {
+    mgr.run(&key, |c| c.commit_plunger_settings()).await
+}
+
+/// Reload the settings and calibration saved in flash.
+#[tauri::command]
+pub async fn plunger_revert(mgr: State<'_, Manager>, key: String) -> Res<()> {
+    mgr.run(&key, |c| c.revert_plunger_settings()).await
+}
+
+/// Put the firmware's defaults into effect (in memory only): uncalibrated
+/// full-range calibration, no jitter filter, default firing time limit and
+/// integration time, standard orientation, 100% scaling, default scan mode.
+#[tauri::command]
+pub async fn plunger_restore_defaults(mgr: State<'_, Manager>, key: String) -> Res<()> {
+    mgr.run(&key, |c| {
+        let cfg = c.query_plunger_config()?;
+        c.set_plunger_calibration(&PlungerCal::defaults(cfg.native_scale))?;
+        c.set_plunger_jitter_filter(0)?;
+        c.set_plunger_firing_time_limit(50_000)?;
+        c.set_plunger_orientation(false)?;
+        c.set_plunger_scaling_factor(100)?;
+        if cfg.has_integration_time {
+            c.set_plunger_integration_time(0)?;
+        }
+        if !cfg.scan_modes.is_empty() {
+            c.set_plunger_scan_mode(0)?;
+        }
+        Ok(())
+    })
+    .await
+}
+
+#[cfg(test)]
+mod tests {
+    use pinscape_protocol::plunger::{PlungerConfig, PlungerReading, SensorData};
+
+    /// The UI (ui/src/lib/api-plunger.ts) relies on these JSON field names.
+    #[test]
+    fn json_shape() {
+        let r = PlungerReading {
+            sensor: Some(SensorData::ImageSensor { sensor_type: 5, timestamp: 1, n_pix: 2, pixels: vec![3, 4] }),
+            ..Default::default()
+        }
+        .with_derived();
+        let v = serde_json::to_value(&r).unwrap();
+        for k in ["rawPos", "z0", "firingStateName", "calZero", "jfLastPre", "manualScalingFactor", "zbLaunch"] {
+            assert!(v.get(k).is_some(), "missing {k}");
+        }
+        assert_eq!(v["sensor"]["kind"], "imageSensor");
+        assert_eq!(v["sensor"]["nPix"], 2);
+        assert_eq!(v["sensor"]["sensorType"], 5);
+        let q = serde_json::to_value(SensorData::Vcnl4010 { sensor_type: 3, prox_count: 9 }).unwrap();
+        assert_eq!(q["kind"], "vcnl4010");
+        assert_eq!(q["proxCount"], 9);
+        let c = serde_json::to_value(PlungerConfig::new(6, 1280, 0)).unwrap();
+        assert_eq!(c["scanModes"][0], "Steady Slope");
+        assert_eq!(c["hasIntegrationTime"], true);
+        let cal: pinscape_protocol::plunger::PlungerCal = serde_json::from_value(serde_json::json!({
+            "calibrated": true, "calMin": 1, "calZero": 2, "calMax": 3, "firingTimeMeasured": 4, "sensorData": [0,0,0,0,0,0,0,0]
+        }))
+        .unwrap();
+        assert_eq!(cal.cal_max, 3);
+    }
+}

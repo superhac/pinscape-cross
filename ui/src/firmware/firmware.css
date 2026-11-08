@@ -1,0 +1,22 @@
+/* Firmware tab, boot loader sidebar entries and install progress. */
+.firmware { display: flex; flex-direction: column; gap: 12px; max-width: 900px; }
+.firmware p { margin: 0 0 8px; line-height: 1.45; }
+.firmware .card .actions { margin-bottom: 8px; }
+.firmware select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; }
+.firmware .dropzone { border-style: dashed; }
+.firmware .dropzone.dragging { border-color: var(--accent); background: var(--bg); }
+.firmware .ok, .firmware-progress .ok { color: var(--ok); }
+.firmware .warn { color: var(--warn); }
+.selectable { user-select: text; }
+button.small-btn { padding: 2px 8px; font-size: 12px; }
+
+.sidebar .sidebar-section { margin: 12px 0 4px; text-transform: uppercase; letter-spacing: 0.04em; }
+.sidebar li.bootloader { display: flex; flex-direction: column; gap: 4px; align-items: flex-start; cursor: default; }
+
+.modal.firmware-modal { width: min(820px, calc(100vw - 32px)); max-height: calc(100vh - 48px); overflow: auto; }
+.modal.firmware-modal .firmware { max-width: none; margin-bottom: 12px; }
+
+.progress { height: 10px; border-radius: 5px; background: var(--border); overflow: hidden; margin: 0 0 8px; }
+.progress > div { height: 100%; background: var(--accent); transition: width 0.2s; }
+.progress.indeterminate > div { width: 30%; animation: fw-slide 1.2s ease-in-out infinite; }
+@keyframes fw-slide { from { margin-left: -30%; } to { margin-left: 100%; } }

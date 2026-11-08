@@ -334,13 +334,41 @@ Original scope:
   mode** on tab close, app quit, disconnect (safety: solenoids).
 - IR tester (received commands, raw pulses, send, TV-ON state, relay control).
 
-### Phase 4 — Nudge & Plunger (2–3 weeks)
+### Phase 4 — Nudge & Plunger (2–3 weeks) ✅ done on Linux (2026-11-08), simulator-tested
+
+Built in parallel (Nudge and Plunger agents). Nudge: live raw/filtered/velocity views and
+uPlot charts, centering and 15 s calibration, full parameter editor (apply/save/revert), ball
+physics tester. Plunger: live gauge with calibration markers, firing state, Z/speed chart,
+image-sensor pixel strip, calibration with undo, all settings with apply/save/revert/defaults.
+Not hardware-tested (no accelerometer or plunger sensor on the test Pico yet). Findings to
+check on hardware / raise upstream: nudge velocity-decay setting appears inverted vs. its
+documentation; plunger calibration values are native units (not 0–65535 as the header says);
+firing time limit 0 over USB is stored literally (not "default").
+
+Original scope:
+
 - uPlot real-time graphs, calibration flows, commit/revert semantics.
 - Plunger imaging-sensor pixel view (canvas) for TCD1103/TSL1410R.
 - MicroPinSim (ball + flipper toy simulator for testing nudge) ported to canvas — may
   slip to v1.1.
 
-### Phase 5 — Firmware & boot loader (1–2 weeks)
+### Phase 5 — Firmware & boot loader (1–2 weeks) ✅ RP2040 PICOBOOT flash verified on hardware (2026-11-08)
+
+Built in parallel with Phase 4. UF2 parsing/validation and flash planning (only covered
+sectors erased; images reaching the top 4 KB config sector of 2/4/8/16 MB flash refused;
+RP2350-E10 workaround block skipped), PICOBOOT client with simulated boot ROM tests,
+mass-storage fallback, boot-loader devices in the sidebar, Firmware tab with progress, and
+`pinscape update <file.uf2> [--dry-run]` in the CLI.
+
+Hardware result (RP2040, Linux): reboot into boot loader → PICOBOOT erase of 149 sectors →
+write → read-back verify → reboot → Pinscape v1.0.2 back with the config byte-identical.
+The ack-after-IN-command handshake and 4 KB chunks work as implemented. Requires the udev
+rule to cover `2e8a:0003`/`000f` (the CLI now prints the fix when it doesn't). Still to verify:
+RP2350 (REBOOT2 flags), the app's Firmware tab on hardware, mass-storage fallback, Windows and
+macOS. Not yet: erase config / whole flash via PICOBOOT.
+
+Original scope:
+
 - PICOBOOT implementation (§4.4) + mass-storage fallback, progress UI, UF2 validation,
   new-device setup wizard, erase config / whole flash.
 

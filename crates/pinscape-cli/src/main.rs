@@ -74,6 +74,18 @@ enum Command {
     },
     /// Set the device's wall clock to this computer's local time
     SetClock,
+    /// Install firmware from a .uf2 file (reboots into the boot loader, flashes
+    /// over USB with verification, and waits for Pinscape to come back).
+    /// Only the flash sectors the image covers are erased; the config is kept.
+    Update {
+        file: PathBuf,
+        /// Show the plan without touching the device
+        #[arg(long)]
+        dry_run: bool,
+        /// Skip read-back verification
+        #[arg(long)]
+        no_verify: bool,
+    },
     /// Check a config file offline (same parser and rules check as the editor)
     Validate { file: PathBuf },
     /// Reboot the device
@@ -257,6 +269,7 @@ fn run(cli: Cli) -> Res {
                 }
             }
         }
+        Command::Update { file, dry_run, no_verify } => update(cli.id.as_deref(), &file, dry_run, !no_verify)?,
         Command::Validate { file } => {
             let text = std::fs::read_to_string(&file)?;
             let diags = pinscape_config::validate(&text);
@@ -297,4 +310,98 @@ fn run(cli: Cli) -> Res {
         }
     }
     Ok(())
+}
+
+/// `pinscape update`: flash a UF2 over PICOBOOT.
+fn update(id: Option<&str>, file: &std::path::Path, dry_run: bool, verify: bool) -> Res {
+    use pinscape_protocol::uf2::{Chip, Uf2Image};
+    use pinscape_usb::bootloader::{self, FlashOptions, Phase};
+    use std::time::Instant;
+
+    let bytes = std::fs::read(file)?;
+    let image = Uf2Image::parse(&bytes)?;
+
+    // Which chip? From the running Pinscape device, else from a Pico already in boot loader mode.
+    let running = usb::open_device(id).ok();
+    let chip = match &running {
+        Some((_, ids)) => Chip::from_cpu_type(ids.cpu_type).ok_or("unknown CPU type")?,
+        None => bootloader::find_boot_devices()?
+            .first()
+            .map(|b| b.chip)
+            .ok_or("no Pinscape Pico or boot-loader Pico found")?,
+    };
+    let plan = image.plan(chip)?;
+    let (lo, hi) = plan.range();
+    let sectors = plan.erase_ranges(4096).len();
+    println!("Image:   {} ({} bytes, {:?})", file.display(), bytes.len(), image.kind());
+    println!("Target:  {} — flash {lo:#010x}..{hi:#010x}, {sectors} sector(s) of 4 KB to erase, {} bytes to write",
+        chip.name(), plan.total_write_bytes());
+    if let Some((_, ids)) = &running {
+        println!("Device:  #{} \"{}\" ({})", ids.unit_num, ids.unit_name, ids.hwid);
+    }
+    if dry_run {
+        println!("Dry run: nothing was changed.");
+        return Ok(());
+    }
+
+    let before: Vec<String> = bootloader::find_boot_devices()?.iter().map(|b| b.key()).collect();
+    if let Some((mut cl, _)) = running {
+        println!("Rebooting into the boot loader...");
+        cl.reset(pinscape_protocol::reset::BOOTLOADER)?;
+    }
+    let t0 = Instant::now();
+    let boot = loop {
+        let found = bootloader::find_boot_devices()?;
+        if let Some(b) = found.iter().find(|b| !before.contains(&b.key())).or(found.first()) {
+            break b.clone();
+        }
+        if t0.elapsed() > Duration::from_secs(20) {
+            return Err("the Pico didn't appear in boot loader mode within 20 s".into());
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    };
+    println!("Boot loader found ({}).", boot.chip.name());
+    // the boot ROM may need a moment before its interface can be claimed
+    let mut pb = {
+        let t1 = Instant::now();
+        loop {
+            match boot.open() {
+                Ok(pb) => break pb,
+                Err(e) if t1.elapsed() < Duration::from_secs(5) && !e.is_permission() => std::thread::sleep(Duration::from_millis(300)),
+                Err(e) if e.is_permission() && cfg!(target_os = "linux") => {
+                    return Err(format!(
+                        "no permission to open the Pico's boot loader (USB 2e8a:{:04x}). The udev rule must cover \
+                         the RP2040/RP2350 boot ROM as well as Pinscape itself. Install the project's rule:\n  \
+                         sudo cp packaging/udev/99-pinscape.rules /etc/udev/rules.d/\n  \
+                         sudo udevadm control --reload && sudo udevadm trigger\n\
+                         then run this command again (the Pico is waiting in boot loader mode; nothing was erased).",
+                        boot.info.product_id()
+                    )
+                    .into())
+                }
+                Err(e) => return Err(format!("can't open the boot loader's PICOBOOT interface: {e}").into()),
+            }
+        }
+    };
+    let mut last = (Phase::Done, u64::MAX);
+    bootloader::flash(&mut pb, &plan, FlashOptions { verify, reboot: true }, &mut |p| {
+        let pct = (p.done * 100).checked_div(p.total).unwrap_or(100);
+        if p.phase != last.0 || pct / 10 != last.1 / 10 {
+            println!("  {:?}: {pct}%", p.phase);
+            last = (p.phase, pct);
+        }
+    })?;
+    drop(pb);
+    println!("Flashed; waiting for Pinscape to restart...");
+    let t2 = Instant::now();
+    loop {
+        if let Ok((mut cl, ids)) = usb::open_device(id) {
+            println!("Pinscape is back: #{} \"{}\", firmware v{}", ids.unit_num, ids.unit_name, cl.query_version()?);
+            return Ok(());
+        }
+        if t2.elapsed() > Duration::from_secs(30) {
+            return Err("flashed, but Pinscape didn't reappear within 30 s".into());
+        }
+        std::thread::sleep(Duration::from_millis(500));
+    }
 }

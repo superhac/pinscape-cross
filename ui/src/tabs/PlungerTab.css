@@ -1,0 +1,84 @@
+/* Plunger tab */
+.plunger { display: flex; flex-direction: column; gap: 10px; min-height: 0; }
+
+.pl-banner {
+  display: flex; flex-direction: column; gap: 6px;
+  padding: 8px 12px; border-radius: 6px; line-height: 1.4;
+  border: 1px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 12%, var(--panel));
+}
+.pl-banner strong { color: var(--accent); }
+.pl-progress { height: 6px; border-radius: 3px; background: var(--panel-2); border: 1px solid var(--border); overflow: hidden; }
+.pl-progress div { height: 100%; background: var(--accent); transition: width 100ms linear; }
+.pl-steps { margin: 0; padding-left: 20px; font-size: 13px; }
+
+.pl-row { display: grid; grid-template-columns: 76px minmax(0, 1fr) 64px; gap: 10px; align-items: center; margin: 6px 0; }
+.pl-label { color: var(--muted); font-size: 12px; }
+.pl-num { font-family: var(--mono); font-size: 12px; text-align: right; }
+.pl-hint { margin: 8px 0 0; }
+
+.pl-gauge { position: relative; height: 16px; }
+.pl-gauge.with-markers { height: 46px; }
+.pl-track {
+  position: absolute; left: 0; right: 0; top: 0; height: 16px;
+  border-radius: 4px; background: var(--panel-2); border: 1px solid var(--border); overflow: hidden;
+}
+.pl-fill { position: absolute; top: 0; bottom: 0; }
+.pl-fill.raw { background: var(--ok); }
+.pl-fill.z0 { background: var(--accent); }
+.pl-fill.z { background: color-mix(in srgb, var(--ok) 80%, var(--accent)); }
+.pl-fill.prox { background: #c026d3; }
+.pl-origin { position: absolute; top: 0; bottom: 0; width: 1px; background: var(--muted); }
+.pl-window {
+  position: absolute; top: 1px; bottom: 1px; border: 1.5px solid var(--accent);
+  background: color-mix(in srgb, var(--accent) 18%, transparent); box-sizing: border-box;
+}
+.pl-tick { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--warn); }
+.pl-marker {
+  position: absolute; top: 15px; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; pointer-events: auto;
+  font-size: 11px; color: var(--muted); line-height: 1.1; white-space: nowrap;
+}
+.pl-marker .pl-arrow { font-size: 9px; color: var(--accent); }
+.pl-marker.low .pl-mlabel { margin-top: 13px; }
+
+.pl-pixels { width: 100%; display: block; border-radius: 4px; border: 1px solid var(--border); background: #000; }
+
+.pl-states { display: flex; flex-wrap: wrap; gap: 4px; }
+.pl-state {
+  font-family: system-ui, sans-serif; font-size: 11px; padding: 0 7px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--muted);
+}
+.pl-state.on { color: var(--accent-text); border-color: transparent; background: var(--off); }
+.pl-state.on.s1 { background: var(--warn); }
+.pl-state.on.s2 { background: var(--danger); }
+.pl-state.on.s3 { background: var(--accent); }
+
+.pl-flags, .pl-quad { display: flex; flex-wrap: wrap; gap: 4px; }
+.pl-flag {
+  font-family: system-ui, sans-serif; font-size: 11px; padding: 0 7px; border-radius: 999px;
+  border: 1px solid var(--border); color: var(--muted); opacity: 0.6;
+}
+.pl-flag.on { opacity: 1; color: var(--text); border-color: var(--ok); background: color-mix(in srgb, var(--ok) 15%, transparent); }
+
+.pl-calstatus { font-weight: 600; margin-bottom: 6px; }
+.pl-ok { color: var(--ok); }
+.pl-calrun { color: var(--accent); }
+
+.pl-settings { display: flex; flex-direction: column; gap: 8px; }
+.pl-setting { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.pl-setting-label { min-width: 150px; }
+.pl-setting input[type="number"] {
+  width: 90px; padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2);
+}
+.pl-setting input.invalid { border-color: var(--danger); }
+.pl-setting select { padding: 3px 6px; border: 1px solid var(--border); border-radius: 4px; background: var(--panel-2); color: var(--text); }
+.pl-setting button { padding: 2px 10px; }
+.pl-setting-check { margin-bottom: 2px; }
+
+.pl-chart { width: 100%; min-height: 220px; }
+.pl-chart .u-legend { font-size: 12px; color: var(--muted); }
+
+.pl-empty { max-width: 640px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
+.pl-empty h2 { font-size: 17px; }
+.pl-empty p, .pl-empty ul { margin: 0; line-height: 1.5; }

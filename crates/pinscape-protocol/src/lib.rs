@@ -356,7 +356,10 @@ impl ConfigArgs {
 
 pub mod buttons;
 pub mod ir;
+pub mod nudge;
 pub mod outputs;
+pub mod plunger;
+pub mod uf2;
 
 /// Subcommands for [`cmd::STATS`].
 pub mod stats {

@@ -12,11 +12,15 @@ import HelpTab from "./tabs/HelpTab";
 import ButtonsTab from "./tabs/ButtonsTab";
 import OutputsTab from "./tabs/OutputsTab";
 import IrTab from "./tabs/IrTab";
+import NudgeTab from "./tabs/NudgeTab";
+import PlungerTab from "./tabs/PlungerTab";
+import FirmwareTab from "./tabs/FirmwareTab";
+import BootLoaderList from "./firmware/BootLoaderList";
 
 // Tabs planned per docs/PLAN.md §3.
 const TABS = ["Overview", "Config", "Safe-Mode Config", "Log", "Buttons", "Outputs", "Nudge", "Plunger", "IR", "Firmware", "Help"] as const;
 type Tab = (typeof TABS)[number];
-const READY: Tab[] = ["Overview", "Config", "Safe-Mode Config", "Log", "Buttons", "Outputs", "IR", "Help"];
+const READY: Tab[] = ["Overview", "Config", "Safe-Mode Config", "Log", "Buttons", "Outputs", "Nudge", "Plunger", "IR", "Firmware", "Help"];
 
 export default function App() {
   const devices = useDevices();
@@ -87,6 +91,7 @@ export default function App() {
         {selected && !dev && devices.length > 0 && (
           <p className="muted small">Selected device disconnected — waiting for it to come back…</p>
         )}
+        <BootLoaderList onStatus={setStatus} />
       </aside>
 
       <main>
@@ -123,6 +128,9 @@ export default function App() {
               <ButtonsTab key={dev.key + ":buttons"} dev={dev} visible={tab === "Buttons"} onStatus={setStatus} />
               <OutputsTab key={dev.key + ":outputs"} dev={dev} visible={tab === "Outputs"} onStatus={setStatus} />
               <IrTab key={dev.key + ":ir"} dev={dev} visible={tab === "IR"} onStatus={setStatus} />
+              <NudgeTab key={dev.key + ":nudge"} dev={dev} visible={tab === "Nudge"} onStatus={setStatus} />
+              <PlungerTab key={dev.key + ":plunger"} dev={dev} visible={tab === "Plunger"} onStatus={setStatus} />
+              <FirmwareTab key={dev.key + ":firmware"} dev={dev} visible={tab === "Firmware"} onStatus={setStatus} />
               {!READY.includes(tab) && (
                 <div className="empty">
                   <p className="muted">{tab}: coming in a later phase (see docs/PLAN.md §8).</p>
