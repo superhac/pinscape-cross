@@ -1,0 +1,9 @@
+# Pinscape Pico: allow non-root access to the vendor (config) interface,
+# and to the RP2040/RP2350 boot ROM PICOBOOT interface for firmware updates.
+# Install: sudo cp 99-pinscape.rules /etc/udev/rules.d/ && sudo udevadm control --reload && sudo udevadm trigger
+SUBSYSTEM=="usb", ATTR{idVendor}=="1209", ATTR{idProduct}=="eaea", MODE="0666", TAG+="uaccess"
+SUBSYSTEM=="usb", ATTR{idVendor}=="1209", ATTR{idProduct}=="eaeb", MODE="0666", TAG+="uaccess"
+# RP2040 boot ROM
+SUBSYSTEM=="usb", ATTR{idVendor}=="2e8a", ATTR{idProduct}=="0003", MODE="0666", TAG+="uaccess"
+# RP2350 boot ROM
+SUBSYSTEM=="usb", ATTR{idVendor}=="2e8a", ATTR{idProduct}=="000f", MODE="0666", TAG+="uaccess"

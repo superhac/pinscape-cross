@@ -1,0 +1,12 @@
+[package]
+name = "pinscape-usb"
+description = "USB transport and device discovery for Pinscape Pico (nusb-based, cross-platform)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+pinscape-protocol.workspace = true
+nusb.workspace = true
+thiserror.workspace = true
+serde.workspace = true

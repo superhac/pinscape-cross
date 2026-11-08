@@ -1,0 +1,10 @@
+[package]
+name = "pinscape-protocol"
+description = "Wire-format definitions for the Pinscape Pico USB vendor interface (no I/O)"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+serde.workspace = true

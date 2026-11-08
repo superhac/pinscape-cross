@@ -1,0 +1,16 @@
+[package]
+name = "pinscape-cli"
+description = "Cross-platform command-line tool for Pinscape Pico"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "pinscape"
+path = "src/main.rs"
+
+[dependencies]
+pinscape-protocol.workspace = true
+pinscape-usb.workspace = true
+clap = { version = "4", features = ["derive"] }
+chrono.workspace = true

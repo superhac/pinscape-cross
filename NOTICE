@@ -1,0 +1,10 @@
+This project implements the USB protocols of Pinscape Pico, and
+redistributes assets derived from it (assets/: help pages, config
+templates, and a schema generated from Firmware/JSONConfigRef.txt).
+crates/pinscape-config/src/parser.rs is a Rust port of the firmware's
+JSON parser (Firmware/JSON.cpp).
+
+Pinscape Pico
+Copyright 2024, 2025 Michael J Roberts
+https://github.com/mjrgh/PinscapePico
+Released under the BSD 3-Clause license.

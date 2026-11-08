@@ -1,0 +1,12 @@
+[package]
+name = "pinscape-config"
+description = "Firmware-compatible parser and schema checker for Pinscape Pico JSON configs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+regex = { version = "1", default-features = false, features = ["std", "unicode-perl"] }
