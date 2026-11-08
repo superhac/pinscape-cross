@@ -1,0 +1,11 @@
+/* RecordControls (Nudge and Plunger "Record CSV"). */
+.record-controls { display: inline-flex; align-items: center; gap: 6px; }
+.record-controls select {
+  font: inherit; color: var(--text); background: var(--panel); border: 1px solid var(--border);
+  border-radius: 6px; padding: 3px 6px;
+}
+.rec-dot {
+  width: 10px; height: 10px; border-radius: 50%; background: var(--danger);
+  animation: rec-blink 1s steps(2, start) infinite;
+}
+@keyframes rec-blink { to { visibility: hidden; } }

@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { KeyboardEvent as ReactKeyboardEvent, useEffect, useRef, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { api, DeviceSnapshot, fmtVersion } from "./api";
 import { useDevices } from "./lib/useDevices";
@@ -16,6 +16,16 @@ import NudgeTab from "./tabs/NudgeTab";
 import PlungerTab from "./tabs/PlungerTab";
 import FirmwareTab from "./tabs/FirmwareTab";
 import BootLoaderList from "./firmware/BootLoaderList";
+import UpdateNotice from "./updater/UpdateNotice";
+import { firmwareApi } from "./lib/api-firmware";
+import { getPrefs, loadPrefs, onPrefsSaveError, subscribePrefs, updatePrefs } from "./prefs/store";
+import { applyAppearance } from "./prefs/appearance";
+import PreferencesDialog from "./prefs/PreferencesDialog";
+import AboutDialog from "./shell/AboutDialog";
+import { onLinkError } from "./shell/links";
+import { useGlobalShortcuts } from "./shell/shortcuts";
+import { modName, useIsMac } from "./shell/platform";
+import { GearIcon, InfoIcon } from "./shell/icons";
 
 // Tabs planned per docs/PLAN.md §3.
 const TABS = ["Overview", "Config", "Safe-Mode Config", "Log", "Buttons", "Outputs", "Nudge", "Plunger", "IR", "Firmware", "Help"] as const;
@@ -30,6 +40,39 @@ export default function App() {
   // Config tabs are mounted on first visit and then kept (hidden), so unsaved
   // edits survive switching tabs.
   const [visited, setVisited] = useState<Set<string>>(new Set());
+  const [dialog, setDialog] = useState<"prefs" | "about" | null>(null);
+  // Startup choices (env options, remembered tab/device) have been applied.
+  const [started, setStarted] = useState(false);
+  // Picos in boot loader mode (listed by BootLoaderList), so "No devices" isn't shown beside them.
+  const [bootCount, setBootCount] = useState(0);
+  const mac = useIsMac();
+  const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
+
+  // Appearance preferences → <html data-theme / data-font-size>.
+  useEffect(() => {
+    applyAppearance(getPrefs());
+    const un = subscribePrefs(applyAppearance);
+    onLinkError(setStatus);
+    onPrefsSaveError((e) => setStatus(`Couldn't save preferences: ${e}`));
+    return () => {
+      un();
+      onLinkError(null);
+      onPrefsSaveError(null);
+    };
+  }, []);
+
+  useEffect(() => {
+    let alive = true;
+    const un = firmwareApi.onBootLoadersChanged((d) => alive && setBootCount(d.length));
+    firmwareApi
+      .bootList()
+      .then((l) => alive && setBootCount(l.devices.length))
+      .catch(() => {});
+    return () => {
+      alive = false;
+      un.then((f) => f());
+    };
+  }, []);
 
   useEffect(() => {
     if (selected && (tab === "Config" || tab === "Safe-Mode Config")) {
@@ -57,11 +100,19 @@ export default function App() {
     };
   }, []);
 
+  // Startup tab/device: environment options (dev_options) win over the
+  // remembered ones (Preferences › Startup).
   useEffect(() => {
-    api.devOptions().then((o) => {
-      const t = TABS.find((x) => x.toLowerCase() === o.startTab?.toLowerCase());
+    Promise.all([
+      api.devOptions().catch(() => ({ startTab: null, startDevice: null })),
+      loadPrefs(),
+    ]).then(([o, p]) => {
+      const wantTab = o.startTab ?? (p.startup.rememberTab ? p.startup.lastTab : null);
+      const t = TABS.find((x) => x.toLowerCase() === wantTab?.toLowerCase());
       if (t) setTab(t);
-      if (o.startDevice) setSelected(o.startDevice);
+      const wantDev = o.startDevice ?? (p.startup.rememberDevice ? p.startup.lastDevice : null);
+      if (wantDev) setSelected(wantDev);
+      setStarted(true);
     });
   }, []);
 
@@ -76,14 +127,81 @@ export default function App() {
   const dev = devices.find((d) => d.key === selected && d.ids) ?? null;
   const broken = devices.find((d) => d.key === selected && !d.ids) ?? null;
 
+  // Remember the tab and (connected) device for next time.
+  useEffect(() => {
+    const s = getPrefs().startup;
+    if (started && s.rememberTab && s.lastTab !== tab) updatePrefs({ startup: { lastTab: tab } });
+  }, [started, tab]);
+  const devKey = dev?.key ?? null;
+  useEffect(() => {
+    const s = getPrefs().startup;
+    if (started && devKey && s.rememberDevice && s.lastDevice !== devKey) updatePrefs({ startup: { lastDevice: devKey } });
+  }, [started, devKey]);
+
+  const tabIdx = TABS.indexOf(tab);
+  const goTab = (i: number, focus = false) => {
+    const n = TABS.length;
+    const j = ((i % n) + n) % n;
+    setTab(TABS[j]);
+    if (focus) tabRefs.current[j]?.focus();
+  };
+  const onTabKey = (e: ReactKeyboardEvent) => {
+    const k = e.key;
+    if (k === "ArrowRight" || k === "ArrowLeft" || k === "Home" || k === "End") {
+      e.preventDefault();
+      goTab(k === "Home" ? 0 : k === "End" ? TABS.length - 1 : tabIdx + (k === "ArrowRight" ? 1 : -1), true);
+    }
+  };
+
+  const reboot = async () => {
+    if (!dev?.ids) {
+      setStatus("Reboot: no device selected.");
+      return;
+    }
+    const unsaved = dirtyEditors();
+    const ok = await confirm({
+      title: "Reboot device?",
+      body:
+        `Reboot #${dev.ids.unit_num} ${dev.ids.unit_name}? It disconnects briefly and reconnects automatically.` +
+        (unsaved.length ? ` Unsaved edits (${unsaved.join(", ")}) stay in the editor.` : ""),
+      ok: "Reboot",
+    });
+    if (!ok) return;
+    try {
+      await api.reset(dev.key, "normal");
+      setStatus("Device rebooting…");
+    } catch (e) {
+      setStatus(`Reboot failed: ${e}`);
+    }
+  };
+
+  useGlobalShortcuts(mac, {
+    tabIndex: (i) => i < TABS.length && setTab(TABS[i]),
+    tabStep: (d) => goTab(tabIdx + d),
+    preferences: () => setDialog("prefs"),
+    help: () => setTab("Help"),
+    reboot,
+  });
+  const m = modName(mac);
+
   return (
     <div className="app">
       <aside className="sidebar">
         <header>
           <h1>Pinscape-Cross</h1>
+          <button className="icon-btn" onClick={() => setDialog("about")} aria-label="About Pinscape-Cross" title="About">
+            <InfoIcon />
+          </button>
+          <button className="icon-btn" onClick={() => setDialog("prefs")} aria-label="Preferences" title={`Preferences (${m}+,)`}>
+            <GearIcon />
+          </button>
         </header>
-        {devices.length === 0 && <p className="muted small">No devices. Plug in a Pinscape Pico; it appears here automatically.</p>}
-        <ul>
+        {devices.length === 0 && bootCount === 0 && (
+          <p className="muted small" role="status">
+            No devices. Plug in a Pinscape Pico; it appears here automatically.
+          </p>
+        )}
+        <ul aria-label="Devices">
           {devices.map((d) => (
             <DeviceItem key={d.key} d={d} active={d.key === selected} onClick={() => setSelected(d.key)} />
           ))}
@@ -92,13 +210,23 @@ export default function App() {
           <p className="muted small">Selected device disconnected — waiting for it to come back…</p>
         )}
         <BootLoaderList onStatus={setStatus} />
+        <UpdateNotice />
       </aside>
 
       <main>
-        <nav className="tabs">
-          {TABS.map((t) => (
+        <nav className="tabs" role="tablist" aria-label="Device views" onKeyDown={onTabKey}>
+          {TABS.map((t, i) => (
             <button
               key={t}
+              ref={(el) => {
+                tabRefs.current[i] = el;
+              }}
+              id={`tab-${i}`}
+              role="tab"
+              aria-selected={t === tab}
+              aria-controls="tabpanel"
+              tabIndex={t === tab ? 0 : -1}
+              title={i < 9 ? `${m}+${i + 1}` : undefined}
               className={t === tab ? "active" : READY.includes(t) ? "" : "pending"}
               onClick={() => setTab(t)}
             >
@@ -106,7 +234,7 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <section className="content">
+        <section className="content" role="tabpanel" id="tabpanel" aria-labelledby={`tab-${tabIdx}`}>
           <HelpTab visible={tab === "Help"} />
           {broken ? (
             tab !== "Help" && <DeviceProblem dev={broken} />
@@ -140,7 +268,9 @@ export default function App() {
           )}
         </section>
         <footer className="statusbar">
-          <span>{status}</span>
+          <span role="status" aria-live="polite">
+            {status}
+          </span>
           {dev?.ids && (
             <span className="muted">
               #{dev.ids.unit_num} {dev.ids.unit_name} · {dev.ids.hwid}
@@ -148,6 +278,8 @@ export default function App() {
           )}
         </footer>
       </main>
+      {dialog === "prefs" && <PreferencesDialog onClose={() => setDialog(null)} />}
+      {dialog === "about" && <AboutDialog onClose={() => setDialog(null)} />}
       <ConfirmHost />
     </div>
   );
@@ -155,7 +287,20 @@ export default function App() {
 
 function DeviceItem({ d, active, onClick }: { d: DeviceSnapshot; active: boolean; onClick: () => void }) {
   return (
-    <li className={(active ? "active " : "") + (d.ids ? "" : "broken")} onClick={onClick} title={d.error ?? undefined}>
+    <li
+      className={(active ? "active " : "") + (d.ids ? "" : "broken")}
+      onClick={onClick}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onClick();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      aria-current={active ? "true" : undefined}
+      title={d.error ?? undefined}
+    >
       {d.ids ? (
         <>
           <strong>

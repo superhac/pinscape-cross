@@ -1,6 +1,18 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { api, Breadcrumb, Diagnostic } from "../api";
+import { api, Breadcrumb, Diagnostic, Preferences } from "../api";
 import { currentTheme, LANG, monaco, registerLanguage, toRange } from "./monaco";
+import { installEmacsKeys } from "./emacs";
+import { getPrefs, subscribePrefs } from "../prefs/store";
+import { isMac } from "../shell/platform";
+
+/** Editor options from Preferences › Editor. */
+function prefOptions(p: Preferences["editor"]): monaco.editor.IEditorOptions {
+  return {
+    fontSize: p.fontSize,
+    minimap: { enabled: p.minimap },
+    wordWrap: p.wordWrap ? "on" : "off",
+  };
+}
 
 export interface ConfigEditorHandle {
   /** Move the cursor to a range and focus the editor. */
@@ -43,16 +55,16 @@ const ConfigEditor = forwardRef<ConfigEditorHandle, Props>(function ConfigEditor
 
   useEffect(() => {
     registerLanguage();
+    const ep = getPrefs().editor;
     const model = monaco.editor.createModel(props.value, LANG);
+    model.updateOptions({ tabSize: ep.tabSize, insertSpaces: ep.insertSpaces });
     const e = monaco.editor.create(host.current!, {
       model,
       theme: currentTheme(),
       automaticLayout: true,
       fontFamily: 'ui-monospace, "SF Mono", "Cascadia Mono", "DejaVu Sans Mono", monospace',
-      fontSize: 13,
-      tabSize: 4,
-      insertSpaces: true,
-      minimap: { enabled: true },
+      ...prefOptions(ep),
+      ariaLabel: "Config editor",
       scrollBeyondLastLine: false,
       renderWhitespace: "selection",
       bracketPairColorization: { enabled: true },
@@ -130,9 +142,25 @@ const ConfigEditor = forwardRef<ConfigEditorHandle, Props>(function ConfigEditor
       e.trigger("keyboard", "editor.action.quickCommand", null),
     );
 
+    // Emacs keys (Preferences › Editor), toggled through a context key.
+    const emacs = installEmacsKeys(e, isMac());
+    emacs.set(ep.emacsKeys);
+
+    // Live preference changes.
+    let lastEditor = ep;
+    const unPrefs = subscribePrefs((p) => {
+      if (p.editor === lastEditor) return;
+      lastEditor = p.editor;
+      e.updateOptions(prefOptions(p.editor));
+      if (!model.isDisposed()) model.updateOptions({ tabSize: p.editor.tabSize, insertSpaces: p.editor.insertSpaces });
+      emacs.set(p.editor.emacsKeys);
+    });
+
+    // Theme: the OS setting or Preferences › Theme.
     const mq = window.matchMedia?.("(prefers-color-scheme: dark)");
     const onScheme = () => monaco.editor.setTheme(currentTheme());
     mq?.addEventListener("change", onScheme);
+    window.addEventListener("pinscape-theme-change", onScheme);
 
     validate();
     breadcrumb();
@@ -142,6 +170,8 @@ const ConfigEditor = forwardRef<ConfigEditorHandle, Props>(function ConfigEditor
       clearTimeout(bTimer);
       subs.forEach((s) => s.dispose());
       mq?.removeEventListener("change", onScheme);
+      window.removeEventListener("pinscape-theme-change", onScheme);
+      unPrefs();
       e.dispose();
       model.dispose();
       editor.current = null;

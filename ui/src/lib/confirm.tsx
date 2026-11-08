@@ -30,7 +30,10 @@ export function ConfirmHost() {
   useEffect(() => {
     if (!req) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") done(false);
+      if (e.key === "Escape") {
+        e.preventDefault();
+        done(false);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -42,9 +45,18 @@ export function ConfirmHost() {
   };
   return (
     <div className="modal-backdrop" onClick={() => done(false)}>
-      <div className="modal" role="dialog" aria-modal="true" onClick={(e) => e.stopPropagation()}>
-        <h2>{req.title}</h2>
-        <p>{req.body}</p>
+      <div
+        className="modal"
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="confirm-title"
+        aria-describedby="confirm-body"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <h2 id="confirm-title">{req.title}</h2>
+        <p id="confirm-body" className="prewrap">
+          {req.body}
+        </p>
         <div className="modal-actions">
           <button onClick={() => done(false)}>Cancel</button>
           <button className={req.danger ? "danger" : "primary"} autoFocus onClick={() => done(true)}>

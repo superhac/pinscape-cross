@@ -141,6 +141,39 @@ export interface PutResult {
   backupError: string | null;
 }
 
+export type ThemePref = "system" | "light" | "dark";
+export type UiFontSize = "small" | "normal" | "large";
+
+/** Mirrors src-tauri/src/prefs.rs (unknown keys from newer versions are kept). */
+export interface Preferences {
+  theme: ThemePref;
+  uiFontSize: UiFontSize;
+  editor: {
+    fontSize: number;
+    tabSize: number;
+    insertSpaces: boolean;
+    minimap: boolean;
+    wordWrap: boolean;
+    emacsKeys: boolean;
+    confirmSave: boolean;
+    rebootAfterSave: boolean;
+    [k: string]: unknown;
+  };
+  backups: { enabled: boolean; retentionDays: number; [k: string]: unknown };
+  startup: {
+    rememberTab: boolean;
+    rememberDevice: boolean;
+    lastTab: string | null;
+    lastDevice: string | null;
+    [k: string]: unknown;
+  };
+  [k: string]: unknown;
+}
+
+export interface AboutInfo {
+  upstreamRevision: string;
+}
+
 export type ResetMode = "normal" | "safe-mode" | "factory" | "bootloader";
 export type ConfigWhich = "main" | "safe-mode" | "all";
 
@@ -172,6 +205,10 @@ export const api = {
   configHover: (text: string, line: number, col: number) => invoke<Hover | null>("config_hover", { text, line, col }),
   configBreadcrumb: (text: string, line: number, col: number) =>
     invoke<Breadcrumb>("config_breadcrumb", { text, line, col }),
+  prefsGet: () => invoke<Preferences>("prefs_get"),
+  prefsSet: (prefs: Preferences) => invoke<Preferences>("prefs_set", { prefs }),
+  aboutInfo: () => invoke<AboutInfo>("about_info"),
+  printWindow: () => invoke<void>("print_window"),
 };
 
 export const fmtVersion = (v: Version) => `${v.major}.${v.minor}.${v.patch}`;

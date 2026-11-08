@@ -80,6 +80,13 @@ pub async fn outputs_set_device_port(
     mgr.run(&key, move |c| c.set_device_port(dev_type, config_index, port, level)).await
 }
 
+/// Reboot a PWMWorker Pico (`worker` = its index in the `workerPico` config
+/// array, i.e. the device's `configIndex`), optionally into its boot loader.
+#[tauri::command]
+pub async fn outputs_pwm_worker_reset(mgr: State<'_, Manager>, key: String, worker: u8, bootloader: bool) -> Res<()> {
+    mgr.run(&key, move |c| c.pwm_worker_reset(worker, bootloader)).await
+}
+
 #[tauri::command]
 pub async fn outputs_set_night_mode(mgr: State<'_, Manager>, key: String, on: bool) -> Res<()> {
     mgr.run(&key, move |c| c.set_night_mode(on)).await

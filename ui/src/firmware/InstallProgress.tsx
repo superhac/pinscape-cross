@@ -28,9 +28,10 @@ export default function InstallProgress() {
         {s.result && (
           <>
             <p className="ok">
-              {s.result.version
-                ? `Done. The device is running Pinscape Pico v${fmtVersion(s.result.version)}.`
-                : "The firmware was written."}
+              {s.result.headline ??
+                (s.result.version
+                  ? `Done. The device is running Pinscape Pico v${fmtVersion(s.result.version)}.`
+                  : "The firmware was written.")}
             </p>
             <p className="muted small">
               Method: {s.result.method === "picoboot" ? "USB (PICOBOOT)" : "copied to the boot drive"}

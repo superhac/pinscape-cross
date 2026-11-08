@@ -42,11 +42,31 @@ export interface ButtonsLive {
   hc165: boolean[];
 }
 
+/** ButtonDesc::FLAG_EVENTLOG: the button's GPIO records timestamped edges (`enableLogging: true`). */
+export const FLAG_EVENTLOG = 0x01;
+
+/** One GPIO edge from the button event log (logical state, polarity applied). */
+export interface ButtonEvent {
+  /** Microseconds since the Pico's last reset. */
+  t: number;
+  pressed: boolean;
+}
+
+export interface GpioEvents {
+  gpio: number;
+  /** New events since the last read, oldest first; null if the GPIO isn't event-logged. */
+  events: ButtonEvent[] | null;
+}
+
 export const buttonsApi = {
   config: (key: string) => invoke<ButtonConfig>("buttons_config", { key }),
   /** `pca9555` / `hc165`: whether to also read those expanders' ports. */
   live: (key: string, pca9555: boolean, hc165: boolean) =>
     invoke<ButtonsLive>("buttons_live", { key, pca9555, hc165 }),
+  /** New event-log entries for each GPIO (reading consumes them on the device). */
+  eventLog: (key: string, gpios: number[]) => invoke<GpioEvents[]>("buttons_event_log", { key, gpios }),
+  /** Discard buffered entries for one GPIO, or all (null). */
+  clearEventLog: (key: string, gpio: number | null) => invoke<void>("buttons_clear_event_log", { key, gpio }),
 };
 
 // ---- Protocol constants (ButtonDesc::TYPE_*, SRC_*, ACTION_*) ----

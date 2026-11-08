@@ -1,0 +1,325 @@
+# Tagged release: builds the installers, the updater artifacts and the `pinscape`
+# CLI for every platform and attaches them to a DRAFT GitHub release. Publishing the
+# draft is a manual step (docs/RELEASING.md); the in-app updater only sees a release
+# once it is published (it reads releases/latest/download/latest.json).
+#
+# Secrets (all optional; without them the build still succeeds, unsigned):
+#   TAURI_SIGNING_PRIVATE_KEY, TAURI_SIGNING_PRIVATE_KEY_PASSWORD
+#       Updater signatures + latest.json. Needs plugins.updater.pubkey set in
+#       src-tauri/tauri.conf.json. A tagged build fails if exactly one of the
+#       two (key / pubkey) is present, so releases can't silently break updates.
+#   APPLE_CERTIFICATE (base64 .p12), APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY
+#       macOS Developer ID signing. Without a certificate the app is ad-hoc signed.
+#   APPLE_ID, APPLE_PASSWORD (app-specific password), APPLE_TEAM_ID
+#     or APPLE_API_ISSUER, APPLE_API_KEY, APPLE_API_PRIVATE_KEY (.p8 contents)
+#       macOS notarization (only used together with APPLE_CERTIFICATE).
+#   WINDOWS_CERTIFICATE (base64 .pfx), WINDOWS_CERTIFICATE_PASSWORD
+#       Windows Authenticode signing of the .exe/.msi.
+#
+# Manual run (Actions > Release > Run workflow): with a tag, (re)builds that tag's
+# draft release; with the tag left empty it's a dry run that only uploads the
+# files as workflow artifacts.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v0.2.0). Empty = dry run, no GitHub release."
+        required: false
+        default: ""
+
+concurrency:
+  group: release-${{ github.event_name == 'push' && github.ref_name || inputs.tag || github.run_id }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  prepare:
+    name: Prepare release
+    runs-on: ubuntu-24.04
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+      version: ${{ steps.meta.outputs.version }}
+      release_id: ${{ steps.release.outputs.id }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Determine tag and version
+        id: meta
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "push" ]; then
+            tag="${GITHUB_REF_NAME}"
+          else
+            tag="${{ inputs.tag }}"
+          fi
+          if [ -n "$tag" ]; then
+            # The tag must match the version in Cargo.toml / tauri.conf.json / package.json,
+            # because the installers and latest.json take their version from there.
+            version="$(scripts/bump-version.sh --check "${tag#v}")"
+          else
+            version="$(scripts/bump-version.sh --check)"
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "Tag: ${tag:-<none, dry run>}  Version: $version"
+
+      - name: Create or reuse the draft release
+        id: release
+        if: steps.meta.outputs.tag != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.meta.outputs.tag }}
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            if [ "$(gh release view "$TAG" --json isDraft -q .isDraft)" != "true" ]; then
+              echo "::error::Release $TAG is already published; refusing to change it."
+              exit 1
+            fi
+            echo "Reusing the existing draft release for $TAG."
+          else
+            if ! scripts/changelog-section.sh "$VERSION" > notes.md || ! [ -s notes.md ]; then
+              echo "::warning::CHANGELOG.md has no section for $VERSION; using a placeholder."
+              echo "See CHANGELOG.md for details." > notes.md
+            fi
+            pre=()
+            case "$VERSION" in *-*) pre=(--prerelease) ;; esac
+            gh release create "$TAG" --draft --verify-tag "${pre[@]}" \
+              --title "Pinscape-Cross $TAG" --notes-file notes.md
+          fi
+          echo "id=$(gh release view "$TAG" --json databaseId -q .databaseId)" >> "$GITHUB_OUTPUT"
+
+  build:
+    name: Build ${{ matrix.label }}
+    needs: prepare
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: x86_64-unknown-linux-gnu
+            label: linux-x86_64
+          - os: windows-latest
+            target: x86_64-pc-windows-msvc
+            label: windows-x86_64
+          - os: macos-latest
+            target: aarch64-apple-darwin
+            label: macos-aarch64
+          - os: macos-latest
+            target: x86_64-apple-darwin
+            label: macos-x86_64
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ needs.prepare.outputs.tag }}
+      VERSION: ${{ needs.prepare.outputs.version }}
+      HAS_WINDOWS_CERT: ${{ secrets.WINDOWS_CERTIFICATE != '' }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            librsvg2-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: release-${{ matrix.target }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install UI dependencies
+        run: npm ci
+
+      # Secrets that are absent must not appear as empty environment variables:
+      # the Tauri bundler treats a set-but-empty APPLE_CERTIFICATE etc. as "sign with this".
+      # Only non-empty values are exported to the following steps.
+      - name: Export signing secrets
+        id: signing
+        shell: bash
+        env:
+          S_TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          S_TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          S_APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          S_APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          S_APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          S_APPLE_ID: ${{ secrets.APPLE_ID }}
+          S_APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          S_APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          S_APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          S_APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          S_APPLE_API_PRIVATE_KEY: ${{ secrets.APPLE_API_PRIVATE_KEY }}
+        run: |
+          export_var() {  # name value
+            local delim="EOF_$(openssl rand -hex 12)"
+            { echo "$1<<$delim"; printf '%s\n' "$2"; echo "$delim"; } >> "$GITHUB_ENV"
+          }
+          export_if_set() {
+            local src="S_$1"
+            if [ -n "${!src}" ]; then export_var "$1" "${!src}"; fi
+          }
+
+          # Updater signing. The password variable must exist (even empty) or the
+          # Tauri CLI asks for it interactively.
+          if [ -n "$S_TAURI_SIGNING_PRIVATE_KEY" ]; then
+            export_var TAURI_SIGNING_PRIVATE_KEY "$S_TAURI_SIGNING_PRIVATE_KEY"
+            export_var TAURI_SIGNING_PRIVATE_KEY_PASSWORD "$S_TAURI_SIGNING_PRIVATE_KEY_PASSWORD"
+            echo "updater_key=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "updater_key=false" >> "$GITHUB_OUTPUT"
+          fi
+
+          if [ "$RUNNER_OS" = "macOS" ]; then
+            if [ -n "$S_APPLE_CERTIFICATE" ]; then
+              export_if_set APPLE_CERTIFICATE
+              export_var APPLE_CERTIFICATE_PASSWORD "$S_APPLE_CERTIFICATE_PASSWORD"
+              export_if_set APPLE_SIGNING_IDENTITY
+              # Notarization: Apple ID + app-specific password, or an App Store Connect API key.
+              if [ -n "$S_APPLE_ID" ] && [ -n "$S_APPLE_PASSWORD" ] && [ -n "$S_APPLE_TEAM_ID" ]; then
+                export_if_set APPLE_ID; export_if_set APPLE_PASSWORD; export_if_set APPLE_TEAM_ID
+                echo "macOS: signing with Developer ID and notarizing (Apple ID)."
+              elif [ -n "$S_APPLE_API_ISSUER" ] && [ -n "$S_APPLE_API_KEY" ] && [ -n "$S_APPLE_API_PRIVATE_KEY" ]; then
+                keyfile="$RUNNER_TEMP/AuthKey_${S_APPLE_API_KEY}.p8"
+                printf '%s\n' "$S_APPLE_API_PRIVATE_KEY" > "$keyfile"
+                export_if_set APPLE_API_ISSUER; export_if_set APPLE_API_KEY
+                export_var APPLE_API_KEY_PATH "$keyfile"
+                echo "macOS: signing with Developer ID and notarizing (API key)."
+              else
+                echo "::warning::macOS: signed but not notarized (no notarization credentials)."
+              fi
+            else
+              # Ad-hoc signature: no Developer ID needed. Gatekeeper still warns on first launch.
+              export_var APPLE_SIGNING_IDENTITY "-"
+              echo "macOS: no certificate, ad-hoc signing."
+            fi
+          fi
+
+      - name: Enable updater artifacts
+        id: updater
+        shell: bash
+        env:
+          HAS_KEY: ${{ steps.signing.outputs.updater_key }}
+        run: |
+          pubkey="$(node -p "(require('./src-tauri/tauri.conf.json').plugins?.updater?.pubkey || '').trim()")"
+          if [ "$HAS_KEY" = "true" ] && [ -n "$pubkey" ]; then
+            # The committed config keeps createUpdaterArtifacts off so local/CI builds
+            # work without the private key; turn it on for this build only.
+            node -e "
+              const fs = require('fs'), p = 'src-tauri/tauri.conf.json';
+              const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+              c.bundle.createUpdaterArtifacts = true;
+              fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');"
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Updater artifacts: on."
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            if [ "$HAS_KEY" = "true" ] || [ -n "$pubkey" ]; then
+              msg="Updater: TAURI_SIGNING_PRIVATE_KEY secret and plugins.updater.pubkey in tauri.conf.json must both be set (see docs/RELEASING.md)."
+              if [ -n "$TAG" ]; then echo "::error::$msg"; exit 1; fi
+              echo "::warning::$msg"
+            else
+              echo "::notice::Updater artifacts off: no update signing key configured. Installed apps won't be offered this release in-app."
+            fi
+          fi
+
+      - name: Windows code signing certificate
+        if: runner.os == 'Windows' && env.HAS_WINDOWS_CERT == 'true'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          $pfx = Join-Path $env:RUNNER_TEMP "certificate.pfx"
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $pw = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $pw |
+            Where-Object { $_.HasPrivateKey } | Select-Object -First 1
+          Remove-Item $pfx
+          node -e "
+            const fs = require('fs'), p = 'src-tauri/tauri.conf.json';
+            const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+            c.bundle.windows = Object.assign(c.bundle.windows || {}, {
+              certificateThumbprint: process.argv[1],
+              digestAlgorithm: 'sha256',
+              timestampUrl: 'http://timestamp.digicert.com'
+            });
+            fs.writeFileSync(p, JSON.stringify(c, null, 2) + '\n');" $cert.Thumbprint
+          Write-Host "Windows: signing with certificate $($cert.Subject)"
+
+      # Builds the installers (.deb/.rpm/.AppImage, .msi/NSIS .exe, .dmg) and, with the
+      # updater enabled, the signed update bundles. With a release, uploads them and
+      # merges this platform into the release's latest.json.
+      - name: Build and upload app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          args: --target ${{ matrix.target }}
+          releaseId: ${{ needs.prepare.outputs.release_id }}
+          tagName: ${{ needs.prepare.outputs.tag }}
+          includeUpdaterJson: ${{ steps.updater.outputs.enabled == 'true' }}
+          updaterJsonPreferNsis: true
+
+      - name: Build CLI
+        run: cargo build --release --locked -p pinscape-cli --target ${{ matrix.target }}
+
+      - name: Package CLI
+        id: cli
+        shell: bash
+        run: |
+          name="pinscape-cli-${VERSION}-${{ matrix.label }}"
+          mkdir -p "dist-cli/$name"
+          cp LICENSE NOTICE packaging/udev/99-pinscape.rules "dist-cli/$name/"
+          if [ "$RUNNER_OS" = "Windows" ]; then
+            cp "target/${{ matrix.target }}/release/pinscape.exe" "dist-cli/$name/"
+            (cd dist-cli && 7z a -tzip "$name.zip" "$name" >/dev/null)
+            echo "file=dist-cli/$name.zip" >> "$GITHUB_OUTPUT"
+          else
+            cp "target/${{ matrix.target }}/release/pinscape" "dist-cli/$name/"
+            tar -C dist-cli -czf "dist-cli/$name.tar.gz" "$name"
+            echo "file=dist-cli/$name.tar.gz" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload CLI to the release
+        if: env.TAG != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: gh release upload "$TAG" "${{ steps.cli.outputs.file }}" --clobber
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pinscape-cross-${{ matrix.label }}
+          retention-days: 14
+          path: |
+            ${{ steps.cli.outputs.file }}
+            target/${{ matrix.target }}/release/bundle/deb/*.deb
+            target/${{ matrix.target }}/release/bundle/rpm/*.rpm
+            target/${{ matrix.target }}/release/bundle/appimage/*.AppImage*
+            target/${{ matrix.target }}/release/bundle/msi/*.msi*
+            target/${{ matrix.target }}/release/bundle/nsis/*.exe*
+            target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+            target/${{ matrix.target }}/release/bundle/macos/*.app.tar.gz*
+          if-no-files-found: error

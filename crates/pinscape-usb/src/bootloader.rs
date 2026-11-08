@@ -25,7 +25,7 @@ use std::time::Duration;
 use nusb::descriptors::TransferType;
 use nusb::transfer::{Buffer, Bulk, ControlIn, ControlOut, ControlType, Direction, In, Out, Recipient};
 use nusb::{DeviceInfo, MaybeFuture};
-use pinscape_protocol::uf2::{Chip, FlashPlan, Uf2Error, SECTOR_SIZE};
+use pinscape_protocol::uf2::{Chip, FlashPlan, Uf2Error, FLASH_START, FLASH_WINDOW, PROTECTED_FLASH_SIZES, SECTOR_SIZE};
 use serde::Serialize;
 
 use crate::{check_completion, map_open_err, Error, RPI_VID};
@@ -184,6 +184,8 @@ pub enum BootError {
     Image(#[from] Uf2Error),
     #[error("verification failed: flash at {addr:#010x} doesn't match the image")]
     Verify { addr: u32 },
+    #[error("verification failed: flash at {addr:#010x} isn't blank after erasing")]
+    NotBlank { addr: u32 },
     #[error("this boot loader doesn't offer the PICOBOOT interface")]
     NoPicobootInterface,
     #[error("no Pico in boot loader mode found")]
@@ -596,6 +598,417 @@ pub fn flash(pb: &mut Picoboot, plan: &FlashPlan, opts: FlashOptions, progress: 
 }
 
 // ---------------------------------------------------------------------------
+// Erasing: the Pinscape config (flash file system), or the whole flash
+// ---------------------------------------------------------------------------
+
+/// Pinscape's flash file system, as laid out by upstream
+/// `Firmware/FlashStorage.cpp` (`Mount()` / `Format()`):
+///
+/// * A fixed-size **central directory** occupies the last
+///   `FLASHSTORAGE_CENTRAL_DIRECTORY_SIZE` bytes (4096, `Firmware/Main.h`) of
+///   the flash size the firmware was *built* for (`PICO_FLASH_SIZE_BYTES`:
+///   2 MB for the `pico` board build, 4 MB for `pico2`), not of the physical
+///   chip.
+/// * It's an array of 32-byte `DirectoryEntry` structs: sequence number
+///   (`0x5AA55AA5` + index), 16-byte file name, allocated size, flash offset,
+///   CRC-32 of the first 28 bytes. Entry 0 is the `/` marker written by
+///   `Format()`; the list ends at the first all-0xFF entry. Replaced entries
+///   have an all-zero name (and no valid CRC) but still own their sectors.
+/// * File contents are allocated in whole sectors **below** the directory,
+///   growing downwards.
+///
+/// If `Mount()` doesn't find a valid directory it formats a new, empty one,
+/// which is why erasing just the directory sector is enough to reset
+/// Pinscape to factory defaults (what upstream's `EraseConfigData()` in
+/// `WinAPI/RP2BootLoaderInterface.cpp` does). We also erase the sectors the
+/// directory lists, so no stale config data stays behind.
+pub mod flashfs {
+    use pinscape_protocol::uf2::{Chip, FLASH_START, SECTOR_SIZE};
+    use serde::Serialize;
+
+    /// `FLASHSTORAGE_CENTRAL_DIRECTORY_SIZE` (Firmware/Main.h).
+    pub const DIR_SIZE: u32 = 4096;
+    /// `sizeof(FlashStorage::DirectoryEntry)`.
+    pub const ENTRY_LEN: usize = 32;
+    /// `DirectoryEntry::SEQUENCE0`.
+    pub const SEQUENCE0: u32 = 0x5AA5_5AA5;
+
+    /// `PICO_FLASH_SIZE_BYTES` of the official firmware builds: `pico`
+    /// (RP2040) = 2 MB, `pico2` (RP2350) = 4 MB.
+    pub fn build_flash_size(chip: Chip) -> u32 {
+        match chip {
+            Chip::Rp2040 => 2 << 20,
+            Chip::Rp2350 => 4 << 20,
+        }
+    }
+
+    /// One allocation listed in the directory.
+    #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+    #[serde(rename_all = "camelCase")]
+    pub struct FsFile {
+        /// File name; empty for a replaced (superseded) entry.
+        pub name: String,
+        /// Absolute (XIP) address of the allocation.
+        pub addr: u32,
+        /// Allocated bytes (whole sectors).
+        pub size: u32,
+        pub replaced: bool,
+    }
+
+    /// Encode one directory entry (with its CRC unless the name is all zero).
+    pub fn encode_entry(index: u32, name: &[u8], max_size: u32, flash_offset: u32) -> [u8; ENTRY_LEN] {
+        let mut e = [0u8; ENTRY_LEN];
+        e[0..4].copy_from_slice(&SEQUENCE0.wrapping_add(index).to_le_bytes());
+        let n = name.len().min(16);
+        e[4..4 + n].copy_from_slice(&name[..n]);
+        e[20..24].copy_from_slice(&max_size.to_le_bytes());
+        e[24..28].copy_from_slice(&flash_offset.to_le_bytes());
+        let crc = if e[4..20].iter().all(|&b| b == 0) { 0 } else { pinscape_protocol::crc32(&e[..28]) };
+        e[28..32].copy_from_slice(&crc.to_le_bytes());
+        e
+    }
+
+    /// Build a directory sector for files allocated downwards from `dir_ofs`
+    /// (as the firmware would), returning the sector and each file's flash offset.
+    pub fn build_directory(dir_ofs: u32, files: &[(&str, u32)]) -> (Vec<u8>, Vec<u32>) {
+        let mut sector = vec![0xFFu8; DIR_SIZE as usize];
+        sector[..ENTRY_LEN].copy_from_slice(&encode_entry(0, b"/", 0, dir_ofs));
+        let mut next = dir_ofs;
+        let mut offsets = Vec::new();
+        for (i, (name, size)) in files.iter().enumerate() {
+            let size = size.div_ceil(SECTOR_SIZE) * SECTOR_SIZE;
+            next -= size;
+            offsets.push(next);
+            let o = (i + 1) * ENTRY_LEN;
+            sector[o..o + ENTRY_LEN].copy_from_slice(&encode_entry(i as u32 + 1, name.as_bytes(), size, next));
+        }
+        (sector, offsets)
+    }
+
+    /// Parse a central directory sector found at flash offset `dir_ofs`,
+    /// with the same integrity checks as the firmware's `Mount()`. `Err`
+    /// says why it isn't a usable Pinscape directory (the firmware would
+    /// format a new one).
+    pub fn parse_directory(sector: &[u8], dir_ofs: u32) -> Result<Vec<FsFile>, String> {
+        let le = |o: usize| u32::from_le_bytes(sector[o..o + 4].try_into().unwrap());
+        if sector.len() < ENTRY_LEN || sector[4] != b'/' || sector[5..20].iter().any(|&b| b != 0) {
+            return Err("no '/' entry".into());
+        }
+        let mut files = Vec::new();
+        for (index, e) in sector.as_chunks::<ENTRY_LEN>().0.iter().enumerate() {
+            let o = index * ENTRY_LEN;
+            if e.iter().all(|&b| b == 0xFF) {
+                break; // end of the list
+            }
+            if le(o) != SEQUENCE0.wrapping_add(index as u32) {
+                return Err(format!("entry {index}: wrong sequence number"));
+            }
+            let name = &e[4..20];
+            let (max_size, ofs, crc) = (le(o + 20), le(o + 24), le(o + 28));
+            let replaced = name.iter().all(|&b| b == 0);
+            let free = name.iter().all(|&b| b == 0xFF) && max_size == u32::MAX && ofs == u32::MAX && crc == u32::MAX;
+            if free {
+                continue;
+            }
+            if !replaced && pinscape_protocol::crc32(&e[..28]) != crc {
+                return Err(format!("entry {index}: CRC mismatch"));
+            }
+            if index == 0 || max_size == 0 {
+                continue;
+            }
+            // Never trust an allocation outside the file area below the directory.
+            if ofs % SECTOR_SIZE != 0 || max_size % SECTOR_SIZE != 0 || ofs < SECTOR_SIZE || ofs.checked_add(max_size).is_none_or(|end| end > dir_ofs) {
+                return Err(format!("entry {index}: allocation {ofs:#x}+{max_size:#x} is outside the file area"));
+            }
+            let end = name.iter().position(|&b| b == 0).unwrap_or(16);
+            files.push(FsFile {
+                name: String::from_utf8_lossy(&name[..end]).into_owned(),
+                addr: FLASH_START + ofs,
+                size: max_size,
+                replaced,
+            });
+        }
+        Ok(files)
+    }
+}
+
+/// What to erase.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum EraseTarget {
+    /// The Pinscape flash file system (config files and saved settings).
+    Config,
+    /// Everything: firmware, config, all data (factory blank).
+    All,
+}
+
+/// Where the flash size an erase plan uses came from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum SizeSource {
+    /// Given by the user.
+    Given,
+    /// Detected from address aliasing (the chip's capacity).
+    Detected,
+    /// The official firmware build's `PICO_FLASH_SIZE_BYTES` for this chip.
+    Build,
+    /// Unknown, so the whole 16 MB address space (as the Windows tool does).
+    Maximum,
+}
+
+/// Exactly which sectors an erase will touch, worked out before anything is erased.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ErasePlan {
+    pub target: EraseTarget,
+    pub chip: Chip,
+    /// Config: the flash size whose top holds the file system. All: bytes erased from the start of flash.
+    pub flash_size: u32,
+    pub flash_size_source: SizeSource,
+    /// Physical capacity found by aliasing, if it could be determined.
+    pub detected_flash_size: Option<u32>,
+    /// Sector-aligned `[address, length]` runs, ascending and merged.
+    pub ranges: Vec<(u32, u32)>,
+    pub sectors: u32,
+    pub bytes: u64,
+    /// Config: a valid Pinscape directory was found.
+    pub fs_found: bool,
+    /// Config: address of the central directory sector.
+    pub dir_addr: Option<u32>,
+    pub files: Vec<flashfs::FsFile>,
+    pub notes: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct EraseOptions {
+    /// Read everything back afterwards and check it's blank.
+    pub verify: bool,
+    /// Reboot the Pico when done (into Pinscape after a config erase; after
+    /// a whole-flash erase there's nothing to run, so it comes back up in
+    /// the boot loader).
+    pub reboot: bool,
+}
+
+/// Validate a user-given flash size (64 KB multiple, 256 KB to 16 MB).
+pub fn check_flash_size(size: u32) -> BootResult<u32> {
+    if !(256 * 1024..=FLASH_WINDOW).contains(&size) || !size.is_multiple_of(64 * 1024) {
+        return Err(BootError::Io(format!(
+            "invalid flash size {size} bytes: must be a multiple of 64 KB between 256 KB and 16 MB"
+        )));
+    }
+    Ok(size)
+}
+
+/// Determine the flash chip's capacity from address aliasing: a chip
+/// ignores address bits above its size, so the first sector reappears at
+/// `size`. `None` when the first sector is blank (uniform), which makes
+/// aliasing undetectable. Needs the XIP read path (call after
+/// [`Picoboot::enter_cmd_xip`]).
+pub fn detect_flash_size(pb: &mut Picoboot) -> BootResult<Option<u32>> {
+    let base = pb.read(FLASH_START, SECTOR_SIZE)?;
+    if base.iter().all(|&b| b == base[0]) {
+        return Ok(None);
+    }
+    let mut size = 128 * 1024;
+    while size < FLASH_WINDOW {
+        if pb.read(FLASH_START + size, SECTOR_SIZE)? == base {
+            return Ok(Some(size));
+        }
+        size *= 2;
+    }
+    Ok(Some(FLASH_WINDOW))
+}
+
+/// Sort and merge `[addr, len)` runs.
+fn merge_ranges(mut v: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
+    v.sort();
+    let mut out: Vec<(u32, u32)> = Vec::new();
+    for (a, l) in v {
+        match out.last_mut() {
+            Some((pa, pl)) if *pa + *pl >= a => *pl = (*pl).max(a + l - *pa),
+            _ => out.push((a, l)),
+        }
+    }
+    out
+}
+
+/// Work out what an erase will touch. Only reads flash.
+///
+/// * `Config`: the central directory sector at the top of the firmware's
+///   build flash size (2 MB RP2040 / 4 MB RP2350, or `flash_size` if given)
+///   plus every sector the directory allocates to files. If there's no valid
+///   directory there (and the chip is known to be larger), the tops of the
+///   other standard sizes are checked too. With no directory anywhere, only
+///   the directory sector is erased (harmless; the firmware formats it).
+/// * `All`: from the start of flash through `flash_size` if given, else the
+///   detected capacity, else the whole 16 MB window.
+pub fn plan_erase(pb: &mut Picoboot, target: EraseTarget, flash_size: Option<u32>) -> BootResult<ErasePlan> {
+    let flash_size = flash_size.map(check_flash_size).transpose()?;
+    let chip = pb.chip();
+    pb.enter_cmd_xip()?;
+    let detected = detect_flash_size(pb)?;
+    let mut notes = Vec::new();
+    let mut plan = ErasePlan {
+        target,
+        chip,
+        flash_size: 0,
+        flash_size_source: SizeSource::Given,
+        detected_flash_size: detected,
+        ranges: Vec::new(),
+        sectors: 0,
+        bytes: 0,
+        fs_found: false,
+        dir_addr: None,
+        files: Vec::new(),
+        notes: Vec::new(),
+    };
+    match target {
+        EraseTarget::All => {
+            let (size, src) = match (flash_size, detected) {
+                (Some(s), _) => (s, SizeSource::Given),
+                (None, Some(d)) => (d, SizeSource::Detected),
+                (None, None) => {
+                    notes.push(
+                        "The flash size couldn't be determined (the start of flash is blank), so the whole 16 MB \
+                         address space is erased, as the Windows tool does. On a smaller chip this erases the same \
+                         sectors several times over and takes longer."
+                            .into(),
+                    );
+                    (FLASH_WINDOW, SizeSource::Maximum)
+                }
+            };
+            if let (Some(d), Some(s)) = (detected, flash_size) {
+                if s > d {
+                    notes.push(format!(
+                        "The given size ({} KB) is larger than the detected chip ({} KB); the extra range aliases onto the same sectors.",
+                        s / 1024,
+                        d / 1024
+                    ));
+                }
+            }
+            plan.flash_size = size;
+            plan.flash_size_source = src;
+            plan.ranges = vec![(FLASH_START, size)];
+        }
+        EraseTarget::Config => {
+            let default = flashfs::build_flash_size(chip);
+            let mut candidates: Vec<(u32, SizeSource)> = match flash_size {
+                Some(s) => vec![(s, SizeSource::Given)],
+                None => {
+                    let mut c = vec![(default, SizeSource::Build)];
+                    if let Some(d) = detected {
+                        // A chip smaller than the build size can't hold it there; look at the other
+                        // standard sizes that fit the chip (never past it: those addresses alias).
+                        c.retain(|&(s, _)| s <= d);
+                        c.extend(PROTECTED_FLASH_SIZES.iter().filter(|&&s| s != default && s <= d).map(|&s| (s, SizeSource::Detected)));
+                    }
+                    if c.is_empty() {
+                        c.push((default, SizeSource::Build));
+                    }
+                    c
+                }
+            };
+            let mut found = None;
+            let mut why = Vec::new();
+            for &(size, src) in &candidates {
+                let dir_ofs = size - flashfs::DIR_SIZE;
+                let sector = pb.read(FLASH_START + dir_ofs, flashfs::DIR_SIZE)?;
+                match flashfs::parse_directory(&sector, dir_ofs) {
+                    Ok(files) => {
+                        found = Some((size, src, files));
+                        break;
+                    }
+                    Err(e) => why.push(format!("{} KB: {e}", size / 1024)),
+                }
+            }
+            plan.fs_found = found.is_some();
+            let (size, src, files) = match found {
+                Some(f) => f,
+                None => {
+                    let (s, src) = candidates.remove(0);
+                    notes.push(format!(
+                        "No Pinscape flash file system was found ({}). The directory sector at the top of the {} KB \
+                         flash is erased anyway, which is harmless; the firmware formats a new one when it starts.",
+                        why.join("; "),
+                        s / 1024
+                    ));
+                    (s, src, Vec::new())
+                }
+            };
+            let dir_addr = FLASH_START + size - flashfs::DIR_SIZE;
+            plan.flash_size = size;
+            plan.flash_size_source = src;
+            plan.dir_addr = Some(dir_addr);
+            let mut ranges = vec![(dir_addr, flashfs::DIR_SIZE)];
+            ranges.extend(files.iter().map(|f| (f.addr, f.size)));
+            plan.ranges = merge_ranges(ranges);
+            plan.files = files;
+        }
+    }
+    plan.bytes = plan.ranges.iter().map(|&(_, l)| l as u64).sum();
+    plan.sectors = (plan.bytes / SECTOR_SIZE as u64) as u32;
+    plan.notes = notes;
+    Ok(plan)
+}
+
+/// Largest single FLASH_ERASE for whole-flash erases: one 64 KB block (the
+/// boot ROM uses the faster block-erase command for aligned 64 KB runs).
+const ERASE_BLOCK: u32 = 64 * 1024;
+
+/// Erase exactly `plan.ranges`: exit XIP → erase → (verify blank) → (reboot).
+pub fn erase(pb: &mut Picoboot, plan: &ErasePlan, opts: EraseOptions, progress: &mut dyn FnMut(Progress)) -> BootResult<()> {
+    if plan.chip != pb.chip() {
+        return Err(BootError::Io(format!(
+            "this erase plan is for an {}, but the boot loader is an {}",
+            plan.chip.name(),
+            pb.chip().name()
+        )));
+    }
+    for &(a, l) in &plan.ranges {
+        if a < FLASH_START || a % SECTOR_SIZE != 0 || l % SECTOR_SIZE != 0 || (a - FLASH_START) as u64 + l as u64 > FLASH_WINDOW as u64 {
+            return Err(BootError::Io(format!("refusing to erase an invalid range {a:#010x}+{l:#x}")));
+        }
+    }
+    pb.exit_xip()?;
+    let total = plan.bytes;
+    let mut done = 0;
+    progress(Progress { phase: Phase::Erasing, done, total });
+    for &(start, len) in &plan.ranges {
+        let mut a = start;
+        let end = start + len;
+        while a < end {
+            let n = if a % ERASE_BLOCK == 0 && end - a >= ERASE_BLOCK { ERASE_BLOCK } else { SECTOR_SIZE };
+            pb.flash_erase(a, n)?;
+            a += n;
+            done += n as u64;
+            progress(Progress { phase: Phase::Erasing, done, total });
+        }
+    }
+    pb.enter_cmd_xip()?;
+    if opts.verify {
+        let mut done = 0;
+        progress(Progress { phase: Phase::Verifying, done, total });
+        for &(start, len) in &plan.ranges {
+            let mut a = start;
+            while a < start + len {
+                let got = pb.read(a, CHUNK)?;
+                if let Some(i) = got.iter().position(|&b| b != 0xFF) {
+                    return Err(BootError::NotBlank { addr: a + i as u32 });
+                }
+                a += CHUNK;
+                done += CHUNK as u64;
+                progress(Progress { phase: Phase::Verifying, done, total });
+            }
+        }
+    }
+    if opts.reboot {
+        progress(Progress { phase: Phase::Rebooting, done: 0, total: 0 });
+        pb.reboot(500)?;
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
 // Mass-storage fallback
 // ---------------------------------------------------------------------------
 
@@ -789,6 +1202,8 @@ pub mod sim {
         pub corrupt_at: Option<u32>,
         /// Simulate a slow device (per command), for UI testing.
         pub delay: Duration,
+        /// A sector (absolute address) that ignores erase commands (to test erase verification).
+        pub stuck_sector: Option<u32>,
         expect: Expect,
         stalled: bool,
         last: CmdStatus,
@@ -811,6 +1226,7 @@ pub mod sim {
                 fail_write_at: None,
                 corrupt_at: None,
                 delay: Duration::ZERO,
+                stuck_sector: None,
                 expect: Expect::Command,
                 stalled: false,
                 last: CmdStatus { token: 0, status: 0, cmd_id: 0, in_progress: false },
@@ -819,6 +1235,30 @@ pub mod sim {
 
         pub fn state(&self) -> std::sync::MutexGuard<'_, SimState> {
             self.0.lock().unwrap()
+        }
+
+        /// Fill the flash like a Pico running Pinscape: `fw_len` bytes of
+        /// (pseudo-random) firmware at the start, and a flash file system
+        /// with `files` (name, size) whose directory sits at the top of
+        /// `fs_size` bytes. Returns each file's absolute address.
+        pub fn seed_pinscape(&self, fw_len: usize, fs_size: u32, files: &[(&str, u32)]) -> Vec<u32> {
+            let mut s = self.state();
+            let mut x: u32 = 0x1234_5678;
+            for b in s.flash[..fw_len].iter_mut() {
+                x ^= x << 13;
+                x ^= x >> 17;
+                x ^= x << 5;
+                *b = x as u8;
+            }
+            let dir_ofs = fs_size - super::flashfs::DIR_SIZE;
+            let (dir, offsets) = super::flashfs::build_directory(dir_ofs, files);
+            let phys = dir_ofs as usize % s.flash.len();
+            s.flash[phys..phys + dir.len()].copy_from_slice(&dir);
+            for (&o, (_, size)) in offsets.iter().zip(files) {
+                let p = o as usize % s.flash.len();
+                s.flash[p..p + *size as usize].fill(0x3C);
+            }
+            offsets.iter().map(|o| FLASH_START + o).collect()
         }
     }
 
@@ -833,8 +1273,15 @@ pub mod sim {
             }
             let addr = u32::from_le_bytes(c.args[0..4].try_into().ok()?);
             let len = u32::from_le_bytes(c.args[4..8].try_into().ok()?);
+            // The whole 16 MB XIP window is addressable; like a real flash chip,
+            // addresses past the chip's size wrap around (alias) onto it.
             let ofs = addr.checked_sub(FLASH_START)? as usize;
-            (ofs + len as usize <= self.flash.len()).then_some((ofs, len as usize))
+            let len = len as usize;
+            if ofs + len > pinscape_protocol::uf2::FLASH_WINDOW as usize {
+                return None;
+            }
+            let phys = ofs % self.flash.len();
+            (phys + len <= self.flash.len()).then_some((phys, len))
         }
 
         fn fail(&mut self, c: &Command, status: u32) -> crate::Result<()> {
@@ -879,9 +1326,15 @@ pub mod sim {
                     if !self.xip_exited {
                         return self.fail(&c, 9);
                     }
-                    self.flash[ofs..ofs + len].fill(0xFF);
-                    for s in (ofs..ofs + len).step_by(4096) {
-                        self.erased.push(FLASH_START + s as u32);
+                    let stuck = self.stuck_sector.map(|a| ((a - FLASH_START) as usize % self.flash.len()) & !4095);
+                    for sec in (ofs..ofs + len).step_by(4096) {
+                        if Some(sec) != stuck {
+                            self.flash[sec..sec + 4096].fill(0xFF);
+                        }
+                    }
+                    let requested = u32::from_le_bytes(c.args[0..4].try_into().unwrap());
+                    for s in (0..len as u32).step_by(4096) {
+                        self.erased.push(requested + s);
                     }
                 }
                 WRITE => {
@@ -1204,6 +1657,169 @@ mod tests {
         assert_eq!(boot_chip(0x2E8A, 0x000F), Some(Chip::Rp2350));
         assert_eq!(boot_chip(0x2E8A, 0x000A), None);
         assert_eq!(boot_chip(0x1209, 0x0003), None);
+    }
+
+    // ---- erase operations ----
+
+    const SEC: u32 = SECTOR_SIZE;
+
+    fn erase_with(sim: &SimPicoboot, chip: Chip, target: EraseTarget, size: Option<u32>, opts: EraseOptions) -> (ErasePlan, Vec<Progress>) {
+        let mut pb = connect(sim, chip);
+        let plan = plan_erase(&mut pb, target, size).unwrap();
+        assert!(sim.state().erased.is_empty(), "planning must not erase anything");
+        let mut ev = Vec::new();
+        erase(&mut pb, &plan, opts, &mut |p| ev.push(p)).unwrap();
+        (plan, ev)
+    }
+
+    const VERIFY_REBOOT: EraseOptions = EraseOptions { verify: true, reboot: true };
+
+    #[test]
+    fn directory_parsing_mirrors_mount() {
+        let dir_ofs = (2 << 20) - SEC;
+        let (mut sector, offs) = flashfs::build_directory(dir_ofs, &[("config.main", 70_000), ("nudge", 4096)]);
+        let files = flashfs::parse_directory(&sector, dir_ofs).unwrap();
+        assert_eq!(files.len(), 2);
+        assert_eq!(files[0], flashfs::FsFile { name: "config.main".into(), addr: FLASH_START + offs[0], size: 18 * SEC, replaced: false });
+        assert_eq!(offs, vec![dir_ofs - 18 * SEC, dir_ofs - 19 * SEC]);
+        // a replaced entry (all-zero name) has no valid CRC but still owns its sectors
+        let r = flashfs::encode_entry(3, &[], SEC, dir_ofs - 25 * SEC);
+        sector[96..128].copy_from_slice(&r);
+        let files = flashfs::parse_directory(&sector, dir_ofs).unwrap();
+        assert!(files[2].replaced && files[2].name.is_empty());
+        // bad CRC, bad sequence, missing "/", allocation reaching into the directory
+        let mut bad = sector.clone();
+        bad[40] ^= 1;
+        assert!(flashfs::parse_directory(&bad, dir_ofs).unwrap_err().contains("CRC"));
+        let mut bad = sector.clone();
+        bad[32] ^= 1;
+        assert!(flashfs::parse_directory(&bad, dir_ofs).unwrap_err().contains("sequence"));
+        assert!(flashfs::parse_directory(&[0xFF; 4096], dir_ofs).is_err());
+        let (bad, _) = flashfs::build_directory(dir_ofs + SEC, &[("x", SEC)]);
+        assert!(flashfs::parse_directory(&bad, dir_ofs).unwrap_err().contains("outside"));
+    }
+
+    #[test]
+    fn erase_config_touches_only_the_file_system() {
+        let sim = SimPicoboot::new(MB2, 0xFF);
+        let files = sim.seed_pinscape(400_000, MB2 as u32, &[("config.main", 65_536), ("config.safe", 8192), ("plunger", 100)]);
+        let before = sim.state().flash.clone();
+        let (plan, ev) = erase_with(&sim, Chip::Rp2040, EraseTarget::Config, None, VERIFY_REBOOT);
+        let top = FLASH_START + MB2 as u32;
+        assert!(plan.fs_found);
+        assert_eq!(plan.detected_flash_size, Some(MB2 as u32));
+        assert_eq!((plan.flash_size, plan.flash_size_source), (MB2 as u32, SizeSource::Build));
+        assert_eq!(plan.dir_addr, Some(top - SEC));
+        assert_eq!(files[2], top - SEC - 16 * SEC - 2 * SEC - SEC);
+        // directory + 16 + 2 + 1 sectors, contiguous below the top
+        assert_eq!(plan.ranges, vec![(top - 20 * SEC, 20 * SEC)]);
+        assert_eq!(plan.sectors, 20);
+        let s = sim.state();
+        let want: Vec<u32> = (0..20).map(|i| top - 20 * SEC + i * SEC).collect();
+        assert_eq!(s.erased, want);
+        let cut = MB2 - 20 * SEC as usize;
+        assert!(s.flash[cut..].iter().all(|&b| b == 0xFF));
+        assert_eq!(&s.flash[..cut], &before[..cut], "firmware and free space untouched");
+        assert!(s.rebooted);
+        assert_eq!(*s.log.last().unwrap(), picoboot::REBOOT);
+        assert_eq!(ev.iter().rev().find(|p| p.phase == Phase::Erasing).unwrap().done, 20 * SEC as u64);
+        assert_eq!(ev.iter().rev().find(|p| p.phase == Phase::Verifying).unwrap().done, 20 * SEC as u64);
+    }
+
+    #[test]
+    fn erase_config_without_a_file_system_erases_just_the_directory_sector() {
+        let sim = SimPicoboot::new(MB2, 0xFF);
+        sim.seed_pinscape(300_000, MB2 as u32, &[]);
+        let n = sim.state().flash.len();
+        sim.state().flash[n - 4096..].fill(0x00); // garbage where the directory goes
+        let (plan, _) = erase_with(&sim, Chip::Rp2040, EraseTarget::Config, None, EraseOptions { verify: false, reboot: false });
+        assert!(!plan.fs_found);
+        assert!(plan.notes[0].contains("No Pinscape flash file system"));
+        assert_eq!(sim.state().erased, vec![FLASH_START + MB2 as u32 - SEC]);
+        assert!(!sim.state().rebooted);
+        assert!(!sim.state().xip_exited, "XIP re-entered when not rebooting");
+    }
+
+    #[test]
+    fn erase_config_finds_the_file_system_for_the_chip_and_flash_size() {
+        // RP2350 (pico2 build): directory at the top of 4 MB
+        let sim = SimPicoboot::new(4 << 20, 0xFF);
+        sim.seed_pinscape(500_000, 4 << 20, &[("config.main", 4096)]);
+        let (plan, _) = erase_with(&sim, Chip::Rp2350, EraseTarget::Config, None, VERIFY_REBOOT);
+        assert_eq!(plan.dir_addr, Some(FLASH_START + (4 << 20) - SEC));
+        assert_eq!(sim.state().erased.len(), 2);
+        assert_eq!(*sim.state().log.last().unwrap(), picoboot::REBOOT2);
+
+        // RP2040 clone with a 16 MB chip running the standard (2 MB) build: still at 2 MB
+        let sim = SimPicoboot::new(16 << 20, 0xFF);
+        sim.seed_pinscape(300_000, 2 << 20, &[("config.main", 4096)]);
+        let (plan, _) = erase_with(&sim, Chip::Rp2040, EraseTarget::Config, None, VERIFY_REBOOT);
+        assert_eq!((plan.dir_addr, plan.flash_size_source), (Some(FLASH_START + (2 << 20) - SEC), SizeSource::Build));
+
+        // ... or a custom 16 MB build: found by checking the detected size's top
+        let sim = SimPicoboot::new(16 << 20, 0xFF);
+        sim.seed_pinscape(300_000, 16 << 20, &[("config.main", 4096)]);
+        let (plan, _) = erase_with(&sim, Chip::Rp2040, EraseTarget::Config, None, VERIFY_REBOOT);
+        assert_eq!((plan.flash_size, plan.flash_size_source), (16 << 20, SizeSource::Detected));
+        assert_eq!(sim.state().erased, vec![FLASH_START + (16 << 20) - 2 * SEC, FLASH_START + (16 << 20) - SEC]);
+
+        // an explicit size wins
+        let sim = SimPicoboot::new(4 << 20, 0xFF);
+        sim.seed_pinscape(300_000, 4 << 20, &[]);
+        let (plan, _) = erase_with(&sim, Chip::Rp2040, EraseTarget::Config, Some(4 << 20), VERIFY_REBOOT);
+        assert_eq!((plan.flash_size_source, plan.fs_found), (SizeSource::Given, true));
+    }
+
+    #[test]
+    fn erase_all_uses_the_detected_size_in_64k_blocks() {
+        let sim = SimPicoboot::new(MB2, 0xFF);
+        sim.seed_pinscape(300_000, MB2 as u32, &[("config.main", 8192)]);
+        let (plan, _) = erase_with(&sim, Chip::Rp2040, EraseTarget::All, None, VERIFY_REBOOT);
+        assert_eq!((plan.flash_size, plan.flash_size_source), (MB2 as u32, SizeSource::Detected));
+        assert_eq!(plan.ranges, vec![(FLASH_START, MB2 as u32)]);
+        let s = sim.state();
+        assert!(s.flash.iter().all(|&b| b == 0xFF));
+        assert_eq!(s.log.iter().filter(|&&c| c == picoboot::FLASH_ERASE).count(), MB2 / (64 * 1024));
+        assert_eq!(s.erased.len(), MB2 / 4096);
+        assert!(s.rebooted);
+    }
+
+    #[test]
+    fn erase_all_on_blank_start_covers_the_whole_window() {
+        let sim = SimPicoboot::new(MB2, 0xFF);
+        let n = sim.state().flash.len();
+        sim.state().flash[n - 4096..].fill(0x11); // config left over, firmware gone
+        let (plan, _) = erase_with(&sim, Chip::Rp2040, EraseTarget::All, None, EraseOptions { verify: true, reboot: false });
+        assert_eq!((plan.flash_size, plan.flash_size_source), (16 << 20, SizeSource::Maximum));
+        assert!(!plan.notes.is_empty());
+        assert!(sim.state().flash.iter().all(|&b| b == 0xFF));
+        assert_eq!(*sim.state().erased.last().unwrap(), FLASH_START + (16 << 20) - SEC);
+    }
+
+    #[test]
+    fn erase_rejects_bad_sizes_and_chip_mismatch() {
+        let sim = SimPicoboot::new(MB2, 0xFF);
+        let mut pb = connect(&sim, Chip::Rp2040);
+        assert!(plan_erase(&mut pb, EraseTarget::All, Some(1000)).is_err());
+        assert!(plan_erase(&mut pb, EraseTarget::All, Some(32 << 20)).is_err());
+        let plan = plan_erase(&mut pb, EraseTarget::All, Some(1 << 20)).unwrap();
+        drop(pb);
+        let mut pb2 = connect(&sim, Chip::Rp2350);
+        assert!(erase(&mut pb2, &plan, VERIFY_REBOOT, &mut |_| {}).is_err());
+        assert!(sim.state().erased.is_empty());
+    }
+
+    #[test]
+    fn erase_verify_detects_a_sector_that_stays_programmed() {
+        let sim = SimPicoboot::new(MB2, 0xFF);
+        sim.seed_pinscape(300_000, MB2 as u32, &[("config.main", 4096)]);
+        let top = FLASH_START + MB2 as u32;
+        sim.state().stuck_sector = Some(top - SEC);
+        let mut pb = connect(&sim, Chip::Rp2040);
+        let plan = plan_erase(&mut pb, EraseTarget::Config, None).unwrap();
+        let err = erase(&mut pb, &plan, VERIFY_REBOOT, &mut |_| {}).unwrap_err();
+        assert!(matches!(err, BootError::NotBlank { addr } if addr == top - SEC), "{err}");
+        assert!(!sim.state().rebooted);
     }
 
     #[test]

@@ -292,6 +292,66 @@ impl ButtonStates {
     }
 }
 
+/// `ButtonEventLogItem::EVENTTYPE_*`.
+pub mod event_type {
+    pub const RELEASE: u8 = 0;
+    pub const PRESS: u8 = 1;
+}
+
+/// Size of the `ButtonEventLog` header as defined by the current protocol.
+pub const EVENT_LOG_LEN: usize = 8;
+/// Size of `ButtonEventLogItem` as defined by the current protocol.
+pub const EVENT_LOG_ITEM_LEN: usize = 16;
+/// GPIO argument for [`subcmd::CLEAR_EVENT_LOG`] meaning "all GPIOs".
+pub const ALL_GPIOS: u8 = 255;
+
+/// One GPIO edge from the button event log (`ButtonEventLogItem`). The
+/// firmware timestamps it in the GPIO interrupt handler, and reports the
+/// logical button state (polarity already applied), not the pin level.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ButtonEvent {
+    /// Microseconds since the Pico's last reset.
+    pub t: u64,
+    /// True for a press (off to on), false for a release.
+    pub pressed: bool,
+}
+
+/// Decode a [`subcmd::QUERY_EVENT_LOG`] reply: a `ButtonEventLog` header
+/// followed by `numItems` items of `cbItem` bytes, oldest first. Honors the
+/// header's own sizes, so larger (newer) structs still decode.
+pub fn decode_event_log(xfer: &[u8]) -> Result<Vec<ButtonEvent>, DecodeError> {
+    if xfer.len() < 6 {
+        return Err(DecodeError::Length { expected: EVENT_LOG_LEN, got: xfer.len() });
+    }
+    let r = Le(xfer);
+    let (cb, n, cb_item) = (r.u16(0) as usize, r.u16(2) as usize, r.u16(4) as usize);
+    let end = cb + n * cb_item;
+    if cb < 6 || (n > 0 && cb_item < 9) || end > xfer.len() {
+        return Err(DecodeError::Length { expected: end.max(6), got: xfer.len() });
+    }
+    Ok((0..n)
+        .map(|i| {
+            let it = Le(&xfer[cb + i * cb_item..cb + (i + 1) * cb_item]);
+            ButtonEvent { t: it.u64(0), pressed: it.u8(8) == event_type::PRESS }
+        })
+        .collect())
+}
+
+/// Encode an event log reply with the current struct sizes (for the simulator and tests).
+pub fn encode_event_log(events: &[ButtonEvent]) -> Vec<u8> {
+    let mut b = Vec::with_capacity(EVENT_LOG_LEN + events.len() * EVENT_LOG_ITEM_LEN);
+    for v in [EVENT_LOG_LEN, events.len(), EVENT_LOG_ITEM_LEN, 0] {
+        b.extend_from_slice(&(v as u16).to_le_bytes());
+    }
+    for e in events {
+        b.extend_from_slice(&e.t.to_le_bytes());
+        b.push(if e.pressed { event_type::PRESS } else { event_type::RELEASE });
+        b.extend_from_slice(&[0; 7]);
+    }
+    b
+}
+
 /// Raw port levels (one byte per port, 0 LOW / 1 HIGH) as booleans.
 pub fn decode_levels(xfer: &[u8]) -> Vec<bool> {
     xfer.iter().map(|&b| b != 0).collect()
@@ -412,6 +472,29 @@ mod tests {
         // older firmware without the shift-state argument
         let r2 = Response { args_size: 0, args: [0; ARGS_LEN], ..r };
         assert_eq!(ButtonStates::decode(&r2, &[]).shift_state, 0);
+    }
+
+    #[test]
+    fn event_log_roundtrip_and_tolerance() {
+        let ev = vec![ButtonEvent { t: 1_000_123, pressed: true }, ButtonEvent { t: 1_080_000, pressed: false }];
+        let b = encode_event_log(&ev);
+        assert_eq!(b.len(), 8 + 2 * 16);
+        assert_eq!(&b[0..6], &[8, 0, 2, 0, 16, 0]);
+        assert_eq!(b[8 + 8], 1);
+        assert_eq!(decode_event_log(&b).unwrap(), ev);
+        assert!(decode_event_log(&encode_event_log(&[])).unwrap().is_empty());
+        // newer firmware: larger header and items
+        let mut n = Vec::new();
+        for v in [12u16, 1, 20, 0, 0, 0] {
+            n.extend_from_slice(&v.to_le_bytes());
+        }
+        n.extend_from_slice(&42u64.to_le_bytes());
+        n.push(0);
+        n.extend_from_slice(&[0xAA; 11]);
+        assert_eq!(decode_event_log(&n).unwrap(), vec![ButtonEvent { t: 42, pressed: false }]);
+        // truncated
+        assert!(decode_event_log(&b[..b.len() - 1]).is_err());
+        assert!(decode_event_log(&[8, 0]).is_err());
     }
 
     #[test]

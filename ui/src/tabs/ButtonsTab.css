@@ -48,3 +48,9 @@
 
 .hc-chip + .hc-chip { margin-top: 8px; }
 .hc-chip > .small { margin-bottom: 4px; }
+
+/* Event log panel */
+.buttons-tab .card h3 { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.evlog-scroll { max-height: 280px; overflow-y: auto; margin-top: 8px; }
+.evlog tr.on td { background: color-mix(in srgb, var(--ok) 10%, transparent); }
+.evlog-summary td, .evlog td { white-space: nowrap; }

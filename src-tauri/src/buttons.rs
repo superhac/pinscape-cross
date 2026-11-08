@@ -1,7 +1,7 @@
 //! Buttons: Tauri commands for CMD_BUTTONS (0x10): button descriptors, logical
 //! button states, GPIO / PCA9555 / 74HC165 input states, shift state.
 
-use pinscape_protocol::buttons::ButtonConfig;
+use pinscape_protocol::buttons::{ButtonConfig, ButtonEvent};
 use serde::Serialize;
 use tauri::State;
 
@@ -44,4 +44,31 @@ pub async fn buttons_live(mgr: State<'_, Manager>, key: String, pca9555: bool, h
         })
     })
     .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GpioEvents {
+    gpio: u8,
+    /// New edges since the last read (oldest first); `None` if the GPIO isn't event-logged.
+    events: Option<Vec<ButtonEvent>>,
+}
+
+/// New entries from the button event log of each GPIO in `gpios` (buttons
+/// with `enableLogging: true`). Reading consumes them on the device.
+#[tauri::command]
+pub async fn buttons_event_log(mgr: State<'_, Manager>, key: String, gpios: Vec<u8>) -> Res<Vec<GpioEvents>> {
+    if gpios.len() > 32 {
+        return Err("too many GPIOs".into());
+    }
+    mgr.run(&key, move |c| {
+        gpios.iter().map(|&gpio| Ok(GpioEvents { gpio, events: c.query_button_event_log(gpio)? })).collect()
+    })
+    .await
+}
+
+/// Discard buffered event-log entries for one GPIO, or all (`gpio` = null).
+#[tauri::command]
+pub async fn buttons_clear_event_log(mgr: State<'_, Manager>, key: String, gpio: Option<u8>) -> Res<()> {
+    mgr.run(&key, move |c| c.clear_button_event_log(gpio)).await
 }

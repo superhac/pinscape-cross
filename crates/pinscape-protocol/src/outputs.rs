@@ -99,7 +99,8 @@ pub fn dev_type_name(t: u8) -> &'static str {
 
 /// True for device types addressed over I2C (`addr` = `(bus << 8) | addr7`).
 pub fn is_i2c(t: u8) -> bool {
-    matches!(t, dev_type::TLC59116 | dev_type::PCA9685 | dev_type::PCA9555)
+    // PWMWorker too: the firmware fills addr as (bus << 8) | addr (Devices/PWM/PWMWorker.cpp)
+    matches!(t, dev_type::TLC59116 | dev_type::PCA9685 | dev_type::PCA9555 | dev_type::PWMWORKER)
 }
 
 /// Header sizes (the minimum we need to read the fields we use).

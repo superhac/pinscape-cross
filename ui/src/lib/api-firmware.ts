@@ -103,6 +103,52 @@ export interface InstallResult {
   deviceKey: string | null;
   version: Version | null;
   notes: string[];
+  /** UI only: replaces the default success line (used for erase jobs). */
+  headline?: string;
+}
+
+export type EraseTarget = "config" | "all";
+
+/** One allocation in Pinscape's flash file system directory. */
+export interface FsFile {
+  name: string;
+  addr: number;
+  size: number;
+  replaced: boolean;
+}
+
+/** Exactly what an erase touched (bootloader.rs ErasePlan). */
+export interface ErasePlan {
+  target: EraseTarget;
+  chip: Chip;
+  flashSize: number;
+  flashSizeSource: "given" | "detected" | "build" | "maximum";
+  detectedFlashSize: number | null;
+  /** [address, length] runs. */
+  ranges: [number, number][];
+  sectors: number;
+  bytes: number;
+  fsFound: boolean;
+  dirAddr: number | null;
+  files: FsFile[];
+  notes: string[];
+}
+
+export interface EraseRequest {
+  deviceKey?: string | null;
+  bootKey?: string | null;
+  target: EraseTarget;
+  /** Override the flash size in bytes (normally detected). */
+  flashSize?: number | null;
+  verify: boolean;
+}
+
+export interface EraseResult {
+  plan: ErasePlan;
+  deviceKey: string | null;
+  version: Version | null;
+  inBootLoader: boolean;
+  notes: string[];
 }
 
 export const firmwareApi = {
@@ -110,6 +156,7 @@ export const firmwareApi = {
   install: (req: InstallRequest) => invoke<InstallResult>("firmware_install", { req }),
   bootList: () => invoke<BootList>("bootloader_list"),
   bootReboot: (key: string) => invoke<void>("bootloader_reboot", { key }),
+  erase: (req: EraseRequest) => invoke<EraseResult>("bootloader_erase", { req }),
   onProgress: (cb: (p: FirmwareProgress) => void): Promise<UnlistenFn> =>
     listen<FirmwareProgress>("firmware-progress", (e) => cb(e.payload)),
   onBootLoadersChanged: (cb: (d: BootDevice[]) => void): Promise<UnlistenFn> =>

@@ -20,3 +20,15 @@ button.small-btn { padding: 2px 8px; font-size: 12px; }
 .progress > div { height: 100%; background: var(--accent); transition: width 0.2s; }
 .progress.indeterminate > div { width: 30%; animation: fw-slide 1.2s ease-in-out infinite; }
 @keyframes fw-slide { from { margin-left: -30%; } to { margin-left: 100%; } }
+
+/* Erase section and drop-anywhere */
+.erase-card .actions select { margin-left: 4px; }
+.erase-card { border-color: color-mix(in srgb, var(--danger) 35%, var(--border)); }
+input.erase-word { width: 100%; margin: 0 0 12px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); font-family: var(--mono); }
+.drop-target { margin-bottom: 10px; }
+.drop-target select { font: inherit; color: var(--text); background: var(--bg); border: 1px solid var(--border); border-radius: 6px; padding: 3px 6px; margin-left: 6px; max-width: 520px; }
+.drop-overlay {
+  position: fixed; inset: 0; z-index: 50; pointer-events: none; display: grid; place-items: center;
+  background: color-mix(in srgb, var(--accent) 14%, transparent); border: 3px dashed var(--accent);
+}
+.drop-overlay > div { background: var(--panel); color: var(--text); padding: 14px 20px; border-radius: 8px; border: 1px solid var(--accent); font-weight: 600; }

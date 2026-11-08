@@ -11,6 +11,7 @@ import {
   TvRelayAction,
   TVON_STATES,
 } from "../lib/api-ir";
+import { saveTextAs, stampedName, toCsv } from "../lib/api-export";
 import "./IrTab.css";
 
 interface Props {
@@ -265,6 +266,18 @@ export default function IrTab({ dev, visible, onStatus }: Props) {
             <button className="small-btn" onClick={() => copy(pulsesText(pulses))} disabled={!pulses.length}>
               Copy as text
             </button>
+            <button
+              className="small-btn"
+              disabled={!pulses.length}
+              title="Save the pulse timeline as a CSV file"
+              onClick={() =>
+                saveTextAs(pulsesCsv(pulses), { title: "Export IR pulses", defaultName: stampedName("ir-pulses", "csv") })
+                  .then((p) => p && onStatus(`Exported ${pulses.length} pulses to ${p}`))
+                  .catch((e) => onStatus(`Export failed: ${e}`))
+              }
+            >
+              Export CSV…
+            </button>
           </h3>
           <PulseView pulses={pulses} />
         </section>
@@ -352,6 +365,19 @@ function Flags({ c }: { c: IrCommandReceived }) {
       ))}
     </span>
   );
+}
+
+/** One row per pulse: index, mark/space, duration (µs, empty if over range), start offset (µs). */
+function pulsesCsv(p: IrRawPulse[]): string {
+  let t = 0;
+  let known = true;
+  const rows = p.map((x, i) => {
+    const row = [i, x.mark ? "mark" : "space", x.tUs ?? "", x.tUs === null ? 1 : 0, known ? t : ""];
+    if (x.tUs === null) known = false;
+    else t += x.tUs;
+    return row;
+  });
+  return toCsv(["index", "type", "duration_us", "over_range", "start_us"], rows);
 }
 
 function pulsesText(p: IrRawPulse[]): string {

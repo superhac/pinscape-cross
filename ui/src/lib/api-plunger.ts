@@ -96,6 +96,19 @@ export function calFromReading(r: PlungerReading): PlungerCal {
   };
 }
 
+/** A calibration copy kept on this computer (src-tauri plunger.rs SavedCalibration). */
+export interface SavedCalibration {
+  hwid: string;
+  sensorType: number;
+  /** RFC 3339 local time. */
+  savedAt: string;
+  cal: PlungerCal;
+}
+
+/** Same calibration points (ignores the opaque sensor data). */
+export const sameCal = (a: PlungerCal, b: PlungerCal) =>
+  a.calibrated === b.calibrated && a.calMin === b.calMin && a.calZero === b.calZero && a.calMax === b.calMax;
+
 export const plungerApi = {
   config: (key: string) => invoke<PlungerConfig>("plunger_config", { key }),
   reading: (key: string, pixels: boolean) => invoke<PlungerReading>("plunger_reading", { key, pixels }),
@@ -110,4 +123,7 @@ export const plungerApi = {
   commit: (key: string) => invoke<void>("plunger_commit", { key }),
   revert: (key: string) => invoke<void>("plunger_revert", { key }),
   restoreDefaults: (key: string) => invoke<void>("plunger_restore_defaults", { key }),
+  savedCalibration: (hwid: string) => invoke<SavedCalibration | null>("plunger_saved_calibration", { hwid }),
+  saveCalibration: (hwid: string, sensorType: number, cal: PlungerCal) =>
+    invoke<SavedCalibration>("plunger_save_calibration", { hwid, sensorType, cal }),
 };

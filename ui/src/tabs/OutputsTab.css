@@ -62,3 +62,5 @@ table.out-ports tr.dim td.out-levels { opacity: 0.6; }
 .out-dport input[type="range"] { width: 100%; accent-color: var(--accent); }
 .out-toggle { padding: 1px 8px; font-size: 12px; }
 .out-toggle.on { background: var(--ok); border-color: var(--ok); color: var(--accent-text); }
+.out-worker-btns { margin-left: auto; display: inline-flex; gap: 6px; text-transform: none; letter-spacing: 0; font-weight: normal; }
+.out-dev h3 { display: flex; align-items: center; gap: 8px; }

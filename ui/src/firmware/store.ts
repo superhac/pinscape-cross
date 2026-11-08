@@ -39,13 +39,18 @@ export function useInstallState(): InstallState {
 export const installRunning = () => state.running;
 
 /** Start an install; resolves when it finishes (never rejects). */
-export async function startInstall(req: InstallRequest, title: string): Promise<InstallResult | null> {
+export function startInstall(req: InstallRequest, title: string): Promise<InstallResult | null> {
+  return startJob(title, () => firmwareApi.install(req));
+}
+
+/** Run any boot-loader job (install, erase) with the shared progress dialog. Never rejects. */
+export async function startJob(title: string, run: () => Promise<InstallResult>): Promise<InstallResult | null> {
   if (state.running) return null;
   set({ running: true, title, progress: null, result: null, error: null, open: true });
   let un: UnlistenFn | null = null;
   try {
     un = await firmwareApi.onProgress((p) => set({ progress: p }));
-    const result = await firmwareApi.install(req);
+    const result = await run();
     set({ running: false, result });
     return result;
   } catch (e) {
@@ -59,3 +64,20 @@ export async function startInstall(req: InstallRequest, title: string): Promise<
 export function dismissInstall() {
   if (!state.running) set({ open: false });
 }
+
+// ---- "drop a .uf2 anywhere" coordination ----
+// An open installer (Firmware tab, boot-loader dialog) handles dropped files
+// itself; the always-mounted BootLoaderList only handles drops nobody claims.
+let dropClaims = 0;
+
+/** Called by a visible Installer; returns the release function. */
+export function claimDrops(): () => void {
+  dropClaims++;
+  let released = false;
+  return () => {
+    if (!released) dropClaims--;
+    released = true;
+  };
+}
+
+export const dropsClaimed = () => dropClaims > 0;

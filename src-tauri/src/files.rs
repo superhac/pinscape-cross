@@ -89,12 +89,12 @@ pub fn write_text_file(path: String, text: String) -> Result<(), String> {
 
 // ---- Automatic backups of every config saved to a device ----
 // Like the Windows tool: one file per save, named
-// <HWID>_<main|safemode>_<YYYYMMDD>_<HHMMSS>.json, pruned after 30 days.
+// <HWID>_<main|safemode>_<YYYYMMDD>_<HHMMSS>.json, pruned after the number of
+// days set in Preferences (default 30; 0 keeps them forever). Backups can be
+// turned off in Preferences.
 
 use std::path::PathBuf;
 use tauri::Manager;
-
-const BACKUP_KEEP_DAYS: u64 = 30;
 
 pub fn backup_dir(app: &tauri::AppHandle) -> Result<PathBuf, String> {
     let d = app.path().app_data_dir().map_err(|e| e.to_string())?.join("backups");
@@ -114,21 +114,38 @@ fn sanitize(id: &str) -> String {
     id.chars().filter(|c| c.is_ascii_alphanumeric()).collect()
 }
 
-/// Save a backup copy of `text`; returns its path.
+/// Message returned by [`write_backup`] when backups are turned off.
+pub const BACKUPS_DISABLED: &str = "automatic backups are turned off in Preferences";
+
+/// Save a backup copy of `text` (unless turned off in Preferences); returns its path.
 pub fn write_backup(app: &tauri::AppHandle, hwid: &str, safe_mode: bool, text: &str) -> Result<PathBuf, String> {
-    write_backup_in(&backup_dir(app)?, hwid, safe_mode, text)
+    let prefs = crate::prefs::load(app).backups;
+    if !prefs.enabled {
+        return Err(BACKUPS_DISABLED.into());
+    }
+    write_backup_in(&backup_dir(app)?, hwid, safe_mode, text, prefs.retention_days)
 }
 
-fn write_backup_in(dir: &std::path::Path, hwid: &str, safe_mode: bool, text: &str) -> Result<PathBuf, String> {
+fn write_backup_in(
+    dir: &std::path::Path,
+    hwid: &str,
+    safe_mode: bool,
+    text: &str,
+    keep_days: u32,
+) -> Result<PathBuf, String> {
     let stamp = chrono::Local::now().format("%Y%m%d_%H%M%S");
     let path = dir.join(format!("{}_{}_{stamp}.json", sanitize(hwid), slot(safe_mode)));
     std::fs::write(&path, text).map_err(|e| format!("{}: {e}", path.display()))?;
-    prune_backups(dir);
+    prune_backups(dir, keep_days);
     Ok(path)
 }
 
-fn prune_backups(dir: &std::path::Path) {
-    let cutoff = std::time::Duration::from_secs(BACKUP_KEEP_DAYS * 86_400);
+/// Delete backups older than `keep_days` (0 = keep everything).
+fn prune_backups(dir: &std::path::Path, keep_days: u32) {
+    if keep_days == 0 {
+        return;
+    }
+    let cutoff = std::time::Duration::from_secs(u64::from(keep_days) * 86_400);
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for e in entries.flatten() {
         let p = e.path();
@@ -197,10 +214,10 @@ mod tests {
     fn backups_roundtrip_and_filtering() {
         let dir = std::env::temp_dir().join(format!("pinscape-backup-test-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let p = write_backup_in(&dir, "E664-8045", false, "{ id: {} }").unwrap();
+        let p = write_backup_in(&dir, "E664-8045", false, "{ id: {} }", 30).unwrap();
         assert!(p.file_name().unwrap().to_str().unwrap().starts_with("E6648045_main_"));
-        write_backup_in(&dir, "E6648045", true, "{}").unwrap();
-        write_backup_in(&dir, "OTHERDEVICE", false, "{}").unwrap();
+        write_backup_in(&dir, "E6648045", true, "{}", 30).unwrap();
+        write_backup_in(&dir, "OTHERDEVICE", false, "{}", 30).unwrap();
         std::fs::write(dir.join("E6648045_main_garbage.json"), "x").unwrap();
 
         let main = list_backups_in(&dir, "E6648045", false).unwrap();
@@ -208,6 +225,24 @@ mod tests {
         assert_eq!(main[0].size, 10);
         assert_eq!(main[0].saved_at.len(), 19);
         assert_eq!(list_backups_in(&dir, "E6648045", true).unwrap().len(), 1);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn prune_respects_retention() {
+        let dir = std::env::temp_dir().join(format!("pinscape-prune-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let old = dir.join("X_main_20000101_000000.json");
+        std::fs::write(&old, "{}").unwrap();
+        let ten_days = std::time::SystemTime::now() - std::time::Duration::from_secs(10 * 86_400);
+        std::fs::File::options().write(true).open(&old).unwrap().set_modified(ten_days).unwrap();
+
+        prune_backups(&dir, 0); // keep forever
+        assert!(old.exists());
+        prune_backups(&dir, 30);
+        assert!(old.exists(), "younger than the retention period");
+        prune_backups(&dir, 7);
+        assert!(!old.exists(), "older than the retention period");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 

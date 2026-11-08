@@ -6,9 +6,12 @@
 //! "Presses" follow a deterministic schedule derived from elapsed time so a
 //! UI polling the device sees activity.
 
+use std::collections::HashMap;
 use std::time::Instant;
 
-use pinscape_protocol::buttons::{action as a, btn_type as t, src, subcmd, ButtonConfig, ButtonDesc, ButtonDevice};
+use pinscape_protocol::buttons::{
+    action as a, btn_type as t, encode_event_log, src, subcmd, ButtonConfig, ButtonDesc, ButtonDevice, ButtonEvent, FLAG_EVENTLOG, ALL_GPIOS,
+};
 use pinscape_protocol::Status;
 
 use super::MockDevice;
@@ -24,8 +27,13 @@ pub struct State {
     pub desc_pad: usize,
     /// Fixed simulation time in ms (tests); `None` uses elapsed real time.
     pub time_ms: Option<u64>,
+    /// Event log read position per GPIO (simulation ms up to which edges were reported).
+    pub event_cursor: HashMap<u8, u64>,
     started: Instant,
 }
+
+/// The firmware's ring buffer holds `MaxEvents` (64) - 1 events.
+pub const EVENT_LOG_CAPACITY: usize = 63;
 
 fn btn(bt: u8, source: u8, unit: u8, port: u8, act: u8, detail: u8) -> ButtonDesc {
     ButtonDesc {
@@ -40,6 +48,11 @@ fn btn(bt: u8, source: u8, unit: u8, port: u8, act: u8, detail: u8) -> ButtonDes
     }
 }
 
+fn logged(mut d: ButtonDesc) -> ButtonDesc {
+    d.flags |= FLAG_EVENTLOG;
+    d
+}
+
 fn shifted(mut d: ButtonDesc, mask: u32, bits: u32) -> ButtonDesc {
     d.shift_mask = mask;
     d.shift_bits = bits;
@@ -49,8 +62,8 @@ fn shifted(mut d: ButtonDesc, mask: u32, bits: u32) -> ButtonDesc {
 impl Default for State {
     fn default() -> Self {
         let buttons = vec![
-            btn(t::PUSH, src::GPIO, 0, 4, a::KEY, 0xE1),  // Left flipper: Left Shift
-            btn(t::PUSH, src::GPIO, 0, 5, a::KEY, 0xE5),  // Right flipper: Right Shift
+            logged(btn(t::PUSH, src::GPIO, 0, 4, a::KEY, 0xE1)), // Left flipper: Left Shift (event-logged)
+            logged(btn(t::PUSH, src::GPIO, 0, 5, a::KEY, 0xE5)), // Right flipper: Right Shift (event-logged)
             shifted(btn(t::PUSH, src::GPIO, 0, 6, a::KEY, 0x1E), 1, 0), // Start: "1" (unshifted)
             shifted(btn(t::PUSH, src::GPIO, 0, 6, a::KEY, 0x29), 1, 1), // Start+Shift: Esc
             btn(t::PUSH, src::GPIO, 0, 7, a::KEY, 0x22),  // Coin: "5"
@@ -70,7 +83,7 @@ impl Default for State {
             ButtonDevice { config_index: 0, dev_type: src::PCA9555, num_ports: 16, addr: 0x20 },
             ButtonDevice { config_index: 0, dev_type: src::HC165, num_ports: 16, addr: 0 },
         ];
-        State { config: ButtonConfig { buttons, devices }, desc_pad: 0, time_ms: None, started: Instant::now() }
+        State { config: ButtonConfig { buttons, devices }, desc_pad: 0, time_ms: None, event_cursor: HashMap::new(), started: Instant::now() }
     }
 }
 
@@ -119,6 +132,28 @@ impl State {
         out
     }
 
+    /// True if a GPIO button on `gpio` has event logging enabled.
+    pub fn event_logged(&self, gpio: u8) -> bool {
+        self.config.buttons.iter().any(|b| b.source_type == src::GPIO && b.source_port == gpio && b.flags & FLAG_EVENTLOG != 0)
+    }
+
+    /// Press/release edges of `gpio` in the simulated-time window `(from, to]` ms,
+    /// newest `EVENT_LOG_CAPACITY` only, timestamped in µs with sub-ms detail.
+    pub fn edges(gpio: u8, from: u64, to: u64) -> Vec<ButtonEvent> {
+        let from = from.max(to.saturating_sub(300_000)); // don't scan forever after a long idle
+        let mut out = Vec::new();
+        let mut prev = Self::pressed(src::GPIO, 0, gpio, from);
+        for ms in from + 1..=to {
+            let p = Self::pressed(src::GPIO, 0, gpio, ms);
+            if p != prev {
+                out.push(ButtonEvent { t: ms * 1000 + (ms * 37 + gpio as u64 * 101) % 1000, pressed: p });
+                prev = p;
+            }
+        }
+        let n = out.len().saturating_sub(EVENT_LOG_CAPACITY);
+        out.split_off(n)
+    }
+
     /// Global shift state: the bits of every pressed shift button.
     pub fn shift_state(&self, ms: u64) -> u32 {
         self.config
@@ -162,6 +197,26 @@ pub(super) fn handle(dev: &mut MockDevice, token: u32, cmd: u8, args: &[u8], xfe
         Some(subcmd::QUERY_GPIO_STATES) => (Status::Ok, vec![], st.gpio_levels(ms)),
         Some(subcmd::QUERY_PCA9555_STATES) => (Status::Ok, vec![], st.device_levels(src::PCA9555, ms)),
         Some(subcmd::QUERY_74HC165_STATES) => (Status::Ok, vec![], st.device_levels(src::HC165, ms)),
+        Some(subcmd::QUERY_EVENT_LOG) => {
+            let gpio = args.get(1).copied().unwrap_or(0);
+            if st.event_logged(gpio) {
+                let from = st.event_cursor.get(&gpio).copied().unwrap_or(0);
+                dev.state.lock().unwrap().buttons.event_cursor.insert(gpio, ms);
+                (Status::Ok, vec![], encode_event_log(&State::edges(gpio, from, ms)))
+            } else {
+                (Status::Failed, vec![], vec![]) // the firmware returns no data -> ERR_FAILED
+            }
+        }
+        Some(subcmd::CLEAR_EVENT_LOG) => {
+            let gpio = args.get(1).copied().unwrap_or(0);
+            let mut s = dev.state.lock().unwrap();
+            let logged: Vec<u8> = (0..30u8).filter(|&g| st.event_logged(g) && (gpio == ALL_GPIOS || g == gpio)).collect();
+            for g in logged {
+                s.buttons.event_cursor.insert(g, ms);
+            }
+            // same quirk as the firmware: only the wildcard reports success
+            (if gpio == ALL_GPIOS { Status::Ok } else { Status::Failed }, vec![], vec![])
+        }
         _ => (Status::BadSubcmd, vec![], vec![]),
     };
     dev.reply(token, cmd, status, &rargs, &data);
@@ -261,6 +316,45 @@ mod tests {
         let st = State::default();
         let a = st.logical_states(0);
         assert!((1..200).any(|i| st.logical_states(i * 50) != a));
+    }
+
+    #[test]
+    fn event_log_reports_each_edge_once() {
+        let h = {
+            let d = MockDevice::with_state(MockState { buttons: State { time_ms: Some(0), ..Default::default() }, ..Default::default() });
+            let h = d.handle();
+            (VendorClient::with_transport(Box::new(d)), h)
+        };
+        let (mut c, h) = h;
+        let set_t = |t: u64| h.lock().unwrap().buttons.time_ms = Some(t);
+        assert_eq!(c.query_button_event_log(4).unwrap(), Some(vec![]));
+        set_t(10_000);
+        let ev = c.query_button_event_log(4).unwrap().unwrap();
+        assert!(ev.len() >= 4, "{ev:?}");
+        assert!(ev.windows(2).all(|w| w[0].t < w[1].t && w[0].pressed != w[1].pressed), "alternating, ascending");
+        assert!(ev.iter().all(|e| e.t <= 10_000_000));
+        // matches the simulated schedule exactly
+        for e in &ev {
+            let ms = e.t / 1000;
+            assert_eq!(State::pressed(src::GPIO, 0, 4, ms), e.pressed);
+            assert_ne!(State::pressed(src::GPIO, 0, 4, ms - 1), e.pressed);
+        }
+        // read again at the same time: nothing new
+        assert_eq!(c.query_button_event_log(4).unwrap(), Some(vec![]));
+        // a GPIO without event logging, and one without any button
+        assert_eq!(c.query_button_event_log(6).unwrap(), None);
+        assert_eq!(c.query_button_event_log(20).unwrap(), None);
+        // clear (single GPIO: firmware reports failure, client tolerates it), then nothing pending
+        set_t(20_000);
+        c.clear_button_event_log(Some(4)).unwrap();
+        assert_eq!(c.query_button_event_log(4).unwrap(), Some(vec![]));
+        assert!(!c.query_button_event_log(5).unwrap().unwrap().is_empty());
+        set_t(30_000);
+        c.clear_button_event_log(None).unwrap();
+        assert_eq!(c.query_button_event_log(5).unwrap(), Some(vec![]));
+        // long idle: capped to the firmware's buffer size
+        set_t(300_000);
+        assert_eq!(c.query_button_event_log(5).unwrap().unwrap().len(), EVENT_LOG_CAPACITY);
     }
 
     #[test]

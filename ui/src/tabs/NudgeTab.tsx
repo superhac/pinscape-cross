@@ -7,6 +7,8 @@ import { Col, History } from "../nudge/history";
 import LiveChart from "../nudge/LiveChart";
 import ParamsEditor, { paramsProblem } from "../nudge/ParamsEditor";
 import PinSim from "../nudge/PinSim";
+import RecordControls from "../nudge/RecordControls";
+import { saveTextAs, stampedName, toCsv, useRecorder } from "../lib/api-export";
 import "./NudgeTab.css";
 
 interface Props {
@@ -64,6 +66,23 @@ export default function NudgeTab({ dev, visible, onStatus }: Props) {
 
   const dirty = draft != null && devParams != null && !paramsEqual(draft, devParams);
 
+  // ---- CSV capture (same columns as the Windows tool's capture, plus velocity) ----
+  const lastCapT = useRef(-1);
+  const rec = useRecorder<NudgeStatus>((samples) => {
+    if (!samples.length) {
+      onStatus("Nothing recorded (no new readings).");
+      return;
+    }
+    const header = ["timestamp", "xRaw", "yRaw", "zRaw", "xFiltered", "yFiltered", "zFiltered", "xAvg", "yAvg", "zAvg",
+      "xCenter", "yCenter", "zCenter", "vx", "vy", "vz"];
+    const rows = samples.map((s) => [s.timestamp, s.xRaw, s.yRaw, s.zRaw, s.xFiltered, s.yFiltered, s.zFiltered,
+      s.xAvg, s.yAvg, s.zAvg, s.xCenter, s.yCenter, s.zCenter, s.vx, s.vy, s.vz]);
+    saveTextAs(toCsv(header, rows), { title: "Save nudge readings", defaultName: stampedName(`${dev.ids?.unit_name ?? "pinscape"}-nudge`, "csv") })
+      .then((p) => onStatus(p ? `Saved ${samples.length} nudge readings to ${p}` : `Recording discarded (${samples.length} readings).`))
+      .catch((e) => onStatus(`Saving the readings failed: ${e}`));
+  });
+  const recPush = rec.push;
+
   // ---- parameters ----
   const loadParams = useCallback(
     (keepEdits = false) =>
@@ -108,13 +127,18 @@ export default function NudgeTab({ dev, visible, onStatus }: Props) {
         loadParams(true);
       }
       calibratingRef.current = s.calibrating;
+      // record each device reading once (polls can return the same sample twice)
+      if (s.hasAccelerometer && s.timestamp !== lastCapT.current) {
+        lastCapT.current = s.timestamp;
+        recPush(s);
+      }
       simInput.current = { vx: s.vx, vy: s.vy, scale: devParamsRef.current?.velocityScalingFactor ?? 100 };
       if (pausedRef.current) return;
       setStatus(s);
       if (history.push(s)) setVersion((v) => v + 1);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [history, loadParams],
+    [history, loadParams, recPush],
   );
 
   // ---- live status polling: one request at a time, while visible ----
@@ -286,6 +310,8 @@ export default function NudgeTab({ dev, visible, onStatus }: Props) {
           <input type="checkbox" checked={autoSaveCal} onChange={(e) => setAutoSaveCal(e.target.checked)} />
           save when done
         </label>
+        <span className="sep" />
+        <RecordControls rec={rec} disabled={!s} what="the accelerometer readings" />
         <span className="spacer" />
         {s?.modified && (
           <span className="badge" title="The device's in-memory settings differ from those saved in flash">

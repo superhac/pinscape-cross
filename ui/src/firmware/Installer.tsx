@@ -14,7 +14,8 @@ import {
   RELEASES_URL,
   Uf2Summary,
 } from "../lib/api-firmware";
-import { startInstall, useInstallState } from "./store";
+import { claimDrops, startInstall, useInstallState } from "./store";
+import EraseCard from "./EraseCard";
 import "./firmware.css";
 
 export type InstallTarget = { kind: "device"; dev: DeviceSnapshot } | { kind: "boot"; boot: BootDevice };
@@ -24,12 +25,16 @@ interface Props {
   /** Listen for dropped .uf2 files only while shown. */
   active: boolean;
   onStatus?: (s: string) => void;
+  /** A .uf2 to load right away (e.g. one dropped on the window from another tab). */
+  initialPath?: string | null;
+  /** Show the "Erase flash" section (default true). */
+  showErase?: boolean;
 }
 
 const boardOf = (c: Chip) => (c === "rp2040" ? "Pico" : "Pico 2");
 
 /** Choose a .uf2, check it against the target Pico, and install it. */
-export default function Installer({ target, active, onStatus }: Props) {
+export default function Installer({ target, active, onStatus, initialPath, showErase = true }: Props) {
   const [uf2, setUf2] = useState<Uf2Summary | null>(null);
   const [loadErr, setLoadErr] = useState<string | null>(null);
   const [dragging, setDragging] = useState(false);
@@ -51,9 +56,16 @@ export default function Installer({ target, active, onStatus }: Props) {
     }
   };
 
-  // Drop a .uf2 file onto the window.
+  useEffect(() => {
+    if (initialPath) load(initialPath);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialPath]);
+
+  // Drop a .uf2 file onto the window (while shown, this installer takes drops
+  // instead of the global handler in BootLoaderList).
   useEffect(() => {
     if (!active) return;
+    const release = claimDrops();
     const un = getCurrentWebview().onDragDropEvent((e) => {
       const p = e.payload;
       if (p.type === "enter") setDragging(p.paths.some((x) => x.toLowerCase().endsWith(".uf2")));
@@ -66,6 +78,7 @@ export default function Installer({ target, active, onStatus }: Props) {
       }
     });
     return () => {
+      release();
       un.then((f) => f());
     };
   }, [active]);
@@ -202,6 +215,8 @@ export default function Installer({ target, active, onStatus }: Props) {
           </p>
         </section>
       )}
+
+      {showErase && <EraseCard target={target} onStatus={onStatus} />}
     </div>
   );
 }

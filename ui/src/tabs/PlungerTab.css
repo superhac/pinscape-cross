@@ -82,3 +82,6 @@
 .pl-empty { max-width: 640px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .pl-empty h2 { font-size: 17px; }
 .pl-empty p, .pl-empty ul { margin: 0; line-height: 1.5; }
+.pl-banner.pl-restore { border-color: var(--warn); background: color-mix(in srgb, var(--warn) 10%, var(--panel)); }
+.pl-banner.pl-restore strong { color: var(--warn); }
+.pl-banner .actions { margin-top: 6px; }

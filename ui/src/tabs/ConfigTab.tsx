@@ -7,6 +7,8 @@ import { setDirty } from "../lib/dirty";
 import ConfigEditor, { ConfigEditorHandle } from "../editor/ConfigEditor";
 import HelpPane from "../editor/HelpPane";
 import BackupPicker from "../lib/BackupPicker";
+import { getPrefs, usePrefs } from "../prefs/store";
+import { printListing } from "../shell/print";
 
 const JSON_FILTER = [{ name: "Pinscape config", extensions: ["json", "json5", "txt"] }];
 
@@ -23,7 +25,9 @@ export default function ConfigTab({ dev, safeMode, visible, onStatus }: Props) {
   const [original, setOriginal] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
-  const [resetAfter, setResetAfter] = useState(true);
+  const prefs = usePrefs();
+  // Default from Preferences › Editor; toggling the box only affects this tab.
+  const [resetAfter, setResetAfter] = useState(() => getPrefs().editor.rebootAfterSave);
   const [picking, setPicking] = useState(false);
   const [restoring, setRestoring] = useState(false);
   const [diags, setDiags] = useState<Diagnostic[]>([]);
@@ -137,15 +141,22 @@ export default function ConfigTab({ dev, safeMode, visible, onStatus }: Props) {
       (resetAfter
         ? `Write ${text.length.toLocaleString()} bytes to the device and reboot it so the new settings take effect?`
         : `Write ${text.length.toLocaleString()} bytes to the device? The new settings take effect after the next reboot.`);
-    const ok = await confirm({ title: warns.length ? "Save with warnings?" : `Save ${what} to device`, body, ok: "Save" });
-    if (!ok) return;
+    // Warnings always need confirmation; a clean save only if Preferences say so.
+    if (warns.length || prefs.editor.confirmSave) {
+      const ok = await confirm({ title: warns.length ? "Save with warnings?" : `Save ${what} to device`, body, ok: "Save" });
+      if (!ok) return;
+    }
     setBusy(true);
     try {
       const r = await api.putConfig(dev.key, text, safeMode, resetAfter);
       setOriginal(text);
       const m =
         (resetAfter ? `Saved ${what}; the device is rebooting.` : `Saved ${what}. Reboot to apply.`) +
-        (r.backup ? " Backup copy kept (Backups…)." : ` Warning: no backup copy (${r.backupError}).`);
+        (r.backup
+          ? " Backup copy kept (Backups…)."
+          : prefs.backups.enabled
+            ? ` Warning: no backup copy (${r.backupError}).`
+            : " No backup copy (turned off in Preferences).");
       setMsg(m);
       onStatus(m);
     } catch (e) {
@@ -153,6 +164,15 @@ export default function ConfigTab({ dev, safeMode, visible, onStatus }: Props) {
     } finally {
       setBusy(false);
     }
+  };
+
+  const print = () => {
+    const name = dev.ids ? `#${dev.ids.unit_num} ${dev.ids.unit_name}` : dev.key;
+    printListing({
+      title: `${safeMode ? "Safe Mode config" : "Config"} — ${name}`,
+      subtitle: [dev.ids?.hwid, dirty ? "includes unsaved edits" : null].filter(Boolean).join(" · "),
+      text,
+    }).catch((e) => setMsg(`Print failed: ${e}`));
   };
 
   const openHelp = (anchor: string | null) => setHelp({ page: "JSONConfigRef.htm", anchor });
@@ -181,6 +201,9 @@ export default function ConfigTab({ dev, safeMode, visible, onStatus }: Props) {
         </button>
         <button onClick={() => setRestoring(true)} disabled={busy} title="Copies of every config saved to this device">
           Backups…
+        </button>
+        <button onClick={print} disabled={!text} title="Print the config with line numbers">
+          Print…
         </button>
         <span className="sep" />
         <button onClick={() => (help ? setHelp(null) : openHelp(crumb?.helpAnchor ?? null))} title="F1 in the editor opens help for the property under the cursor">
@@ -221,7 +244,7 @@ export default function ConfigTab({ dev, safeMode, visible, onStatus }: Props) {
             readOnly={busy}
           />
           <div className="problems">
-            <button className="problems-head" onClick={() => setShowProblems(!showProblems)}>
+            <button className="problems-head" onClick={() => setShowProblems(!showProblems)} aria-expanded={showProblems}>
               <span>{showProblems ? "▾" : "▸"} Problems</span>
               <span className={errors.length ? "error" : "muted"}>
                 {errors.length} error{errors.length === 1 ? "" : "s"}
@@ -233,8 +256,20 @@ export default function ConfigTab({ dev, safeMode, visible, onStatus }: Props) {
             {showProblems && diags.length > 0 && (
               <ul>
                 {diags.slice(0, 200).map((d, i) => (
-                  <li key={i} onClick={() => editor.current?.reveal(d)}>
-                    <span className={d.severity === "error" ? "error" : "warn"}>{d.severity === "error" ? "✖" : "▲"}</span>
+                  <li
+                    key={i}
+                    tabIndex={0}
+                    onClick={() => editor.current?.reveal(d)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        editor.current?.reveal(d);
+                      }
+                    }}
+                  >
+                    <span className={d.severity === "error" ? "error" : "warn"} role="img" aria-label={d.severity}>
+                      {d.severity === "error" ? "✖" : "▲"}
+                    </span>
                     <span className="muted small">
                       {d.range.startLine}:{d.range.startCol}
                     </span>

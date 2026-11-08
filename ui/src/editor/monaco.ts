@@ -5,6 +5,7 @@
 import * as monaco from "monaco-editor/esm/vs/editor/edcore.main";
 import EditorWorker from "monaco-editor/esm/vs/editor/editor.worker?worker";
 import { api, EditorRange } from "../api";
+import { isDarkTheme } from "../prefs/appearance";
 
 export { monaco };
 export const LANG = "pinscape-json";
@@ -154,7 +155,7 @@ export function registerLanguage() {
   });
 }
 
-/** Light/dark theme following the OS setting. */
+/** Light/dark editor theme matching the app (Preferences › Theme, else the OS). */
 export function currentTheme() {
-  return window.matchMedia?.("(prefers-color-scheme: dark)").matches ? "pinscape-dark" : "pinscape-light";
+  return isDarkTheme() ? "pinscape-dark" : "pinscape-light";
 }

@@ -372,7 +372,20 @@ Original scope:
 - PICOBOOT implementation (§4.4) + mass-storage fallback, progress UI, UF2 validation,
   new-device setup wizard, erase config / whole flash.
 
-### Phase 6 — Polish & release (1–2 weeks)
+### Phase 6 — Polish & release (1–2 weeks) ✅ built (2026-11-08); release pipeline awaits a first tagged release
+
+Built in parallel by three agents (app shell, release engineering, leftover device features):
+preferences (theme, text size, editor options incl. Emacs keys, save confirmations, backup
+retention, remember tab/device), About, keyboard shortcuts, external links, print, a11y pass;
+tagged-release workflow (draft release, all installers + CLI archives, optional signing),
+auto-update (off until a signing key is configured), version bump script, CHANGELOG, user guide,
+releasing guide; plus the deferred items from Phases 3–5: PICOBOOT erase config / whole flash
+(+ `pinscape erase-flash`), drop a .uf2 on any tab, button event log, IR pulse CSV, PWMWorker
+reset, nudge/plunger CSV recording, saved plunger calibration with restore. Linux build
+prerequisites trimmed to what the app uses. Manual tests are listed in the README checklist.
+
+Original scope:
+
 - Preferences, About, keyboard shortcuts, print, accessibility pass.
 - Installers + signing/notarization; auto-update via Tauri updater (optional).
 - User docs.
@@ -429,7 +442,7 @@ mismatched family IDs; config save refuses syntax errors.
 |---|---|---|---|
 | Rust | rustup (stable ≥ 1.77) | rustup + MSVC Build Tools | rustup + Xcode CLT |
 | Node | `sudo apt install nodejs npm` (Debian 13: Node 20; Ubuntu 24.04: Node 18; Ubuntu 22.04 needs NodeSource/nvm) | Node 20+ | Node 20+ |
-| System | `libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config`, plus the udev rule from `packaging/udev/` | WebView2 (preinstalled on Win 10/11) | — |
+| System | `libwebkit2gtk-4.1-dev build-essential curl wget file librsvg2-dev pkg-config`, plus the udev rule from `packaging/udev/` | WebView2 (preinstalled on Win 10/11) | — |
 | Tauri CLI | `cargo install tauri-cli --version "^2"` (or `npm run tauri`) | same | same |
 
 ---

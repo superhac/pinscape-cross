@@ -8,8 +8,13 @@
 //!   (or copy onto the boot drive as a fallback), and wait for the device to
 //!   come back. Progress goes out as `firmware-progress` events.
 //!
+//! * `bootloader_erase` erases the Pinscape config (flash file system) or the
+//!   whole flash over PICOBOOT, rebooting a running device into its boot
+//!   loader first if needed (see `bootloader::plan_erase` for the sectors).
+//!
 //! `PINSCAPE_MOCK_BOOTLOADER=1` adds a simulated RP2040 boot device (flash
-//! in memory, slowed down) for UI work without hardware.
+//! in memory, seeded with fake firmware and config files, slowed down) for
+//! UI work without hardware.
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -22,7 +27,8 @@ use pinscape_protocol::reset;
 use pinscape_protocol::uf2::{Chip, Uf2Image, Uf2Info};
 use pinscape_protocol::Version;
 use pinscape_usb::bootloader::{
-    self as boot, sim::SimPicoboot, BootDevice, BootDeviceSummary, BootError, BootVolume, FlashOptions, Phase, Picoboot, Progress,
+    self as boot, sim::SimPicoboot, BootDevice, BootDeviceSummary, BootError, BootVolume, EraseOptions, ErasePlan, EraseTarget,
+    FlashOptions, Phase, Picoboot, Progress,
 };
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
@@ -53,6 +59,7 @@ impl Firmware {
     pub fn start(app: AppHandle) -> Firmware {
         let sim = std::env::var_os("PINSCAPE_MOCK_BOOTLOADER").map(|_| {
             let s = SimPicoboot::new(2 << 20, 0xFF);
+            s.seed_pinscape(400_000, 2 << 20, &[("config.main", 32_768), ("config.safe", 4096), ("plunger.cal", 4096)]);
             s.state().delay = Duration::from_millis(15);
             s
         });
@@ -473,6 +480,137 @@ pub async fn firmware_install(
     .await
     .map_err(|e| e.to_string())?;
     result
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EraseRequest {
+    /// A running Pinscape device to reboot into its boot loader first.
+    device_key: Option<String>,
+    /// A Pico already in boot loader mode.
+    boot_key: Option<String>,
+    target: EraseTarget,
+    /// Override the flash size (bytes); normally detected / the build's size.
+    flash_size: Option<u32>,
+    verify: bool,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct EraseResult {
+    plan: ErasePlan,
+    /// The Pinscape device that came back after a config erase, if seen.
+    device_key: Option<String>,
+    version: Option<Version>,
+    /// The Pico was left in boot loader mode (after erasing everything).
+    in_boot_loader: bool,
+    notes: Vec<String>,
+}
+
+/// Open a boot device, retrying briefly (the boot ROM may need a moment after enumerating).
+fn open_retry(fw: &Firmware, key: &str) -> Result<Picoboot, BootError> {
+    wait_for(Duration::from_secs(3), || match fw.open(key) {
+        Ok(pb) => Some(Ok(pb)),
+        Err(e) if e.is_permission() || matches!(e, BootError::NoPicobootInterface) => Some(Err(e)),
+        Err(_) => None,
+    })
+    .unwrap_or_else(|| fw.open(key))
+}
+
+/// Erase the Pinscape config area or the entire flash over PICOBOOT.
+/// Emits `firmware-progress` events (shared with installs).
+#[tauri::command]
+pub async fn bootloader_erase(
+    app: AppHandle,
+    mgr: State<'_, Manager>,
+    fw: State<'_, Firmware>,
+    req: EraseRequest,
+) -> Res<EraseResult> {
+    let fw = fw.inner().clone();
+    let mgr = mgr.inner().clone();
+    if let Some(s) = req.flash_size {
+        boot::check_flash_size(s).map_err(|e| e.to_string())?;
+    }
+    if fw.busy.swap(true, Ordering::SeqCst) {
+        return Err("a firmware installation or erase is already running".into());
+    }
+    let guard = BusyGuard(fw.busy.clone());
+
+    let snapshot = mgr.snapshot();
+    let chip = match (&req.device_key, &req.boot_key) {
+        (Some(k), _) => {
+            let ids = snapshot.iter().find(|d| &d.key == k).and_then(|d| d.ids.clone()).ok_or_else(|| format!("device {k} is not connected"))?;
+            Chip::from_cpu_type(ids.cpu_type).ok_or_else(|| format!("unknown CPU type RP{}", ids.cpu_type))?
+        }
+        (None, Some(k)) => fw.chip_of(k).ok_or("the boot loader device is no longer connected")?,
+        (None, None) => return Err("no target device given".into()),
+    };
+    let boot_before = boot_keys(&fw);
+    let pinscape_before: HashSet<String> = snapshot.iter().map(|d| d.key.clone()).collect();
+    if let Some(k) = &req.device_key {
+        emit(&app, Phase::EnterBootLoader, 0, 0, None);
+        mgr.run(k, |c| c.reset(reset::BOOTLOADER)).await?;
+    }
+
+    tauri::async_runtime::spawn_blocking(move || {
+        let _guard = guard;
+        let mut notes = Vec::new();
+        let key = match &req.boot_key {
+            Some(k) if req.device_key.is_none() => k.clone(),
+            _ => {
+                emit(&app, Phase::WaitBootLoader, 0, 0, None);
+                wait_for(Duration::from_secs(20), || {
+                    fw.scan();
+                    fw.list().into_iter().find(|d| !boot_before.contains(&d.key) && d.chip == chip && d.picoboot).map(|d| d.key)
+                })
+                .ok_or("The Pico didn't appear in boot loader mode within 20 seconds. Nothing was erased. Hold BOOTSEL \
+                        while plugging it in, then use the boot loader entry in the sidebar.")?
+            }
+        };
+        emit(&app, Phase::Connecting, 0, 0, None);
+        let mut pb = open_retry(&fw, &key).map_err(|e| {
+            let mut h = open_hint(&e, Some(chip));
+            if cfg!(windows) && chip == Chip::Rp2040 {
+                h.push_str(" Erasing needs the USB (PICOBOOT) interface; there's no drive-copy alternative.");
+            }
+            h
+        })?;
+        emit(&app, Phase::Connecting, 0, 0, Some("Reading the flash layout…".into()));
+        let plan = boot::plan_erase(&mut pb, req.target, req.flash_size).map_err(|e| format!("Couldn't read the flash: {e}. Nothing was erased."))?;
+        let reboot = req.target == EraseTarget::Config;
+        boot::erase(&mut pb, &plan, EraseOptions { verify: req.verify, reboot }, &mut |p| emit(&app, p.phase, p.done, p.total, None))
+            .map_err(|e| format!("Erasing failed: {e}. The Pico stays in boot loader mode; try again."))?;
+        drop(pb);
+        notes.extend(plan.notes.iter().cloned());
+
+        if key == SIM_KEY {
+            emit(&app, Phase::Done, 1, 1, None);
+            notes.push("Simulated boot loader: nothing was erased on real hardware.".into());
+            return Ok(EraseResult { plan, device_key: None, version: None, in_boot_loader: !reboot, notes });
+        }
+        if !reboot {
+            emit(&app, Phase::Done, 1, 1, None);
+            notes.push("The Pico has no firmware now and stays in boot loader mode; install firmware from its entry in the sidebar.".into());
+            return Ok(EraseResult { plan, device_key: None, version: None, in_boot_loader: true, notes });
+        }
+        emit(&app, Phase::WaitDevice, 0, 0, None);
+        let back = wait_for(Duration::from_secs(30), || {
+            mgr.snapshot().into_iter().find(|d| {
+                d.version.is_some()
+                    && match &req.device_key {
+                        Some(k) => &d.key == k,
+                        None => !pinscape_before.contains(&d.key),
+                    }
+            })
+        });
+        emit(&app, Phase::Done, 1, 1, None);
+        if back.is_none() {
+            notes.push("The config was erased, but no Pinscape device has reported back yet (is Pinscape firmware installed?).".into());
+        }
+        Ok(EraseResult { device_key: back.as_ref().map(|d| d.key.clone()), version: back.and_then(|d| d.version), plan, in_boot_loader: false, notes })
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]

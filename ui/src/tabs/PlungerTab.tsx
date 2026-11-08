@@ -8,6 +8,8 @@ import {
   PlungerConfig,
   PlungerReading,
   plungerApi,
+  SavedCalibration,
+  sameCal,
   SENSOR,
   SensorData,
 } from "../lib/api-plunger";
@@ -15,6 +17,8 @@ import { confirm } from "../lib/confirm";
 import Gauge from "../plunger/Gauge";
 import PixelView from "../plunger/PixelView";
 import PlungerChart from "../plunger/PlungerChart";
+import RecordControls from "../nudge/RecordControls";
+import { saveTextAs, stampedName, toCsv, useRecorder } from "../lib/api-export";
 import "./PlungerTab.css";
 
 interface Props {
@@ -65,6 +69,10 @@ export default function PlungerTab({ dev, visible, onStatus }: Props) {
   /** Calibration in effect before the last Calibrate click, for undo. */
   const [prevCal, setPrevCal] = useState<PlungerCal | null>(null);
   const [calStart, setCalStart] = useState<number | null>(null);
+  /** Calibration copy kept on this computer for this device. */
+  const [savedCal, setSavedCal] = useState<SavedCalibration | null>(null);
+  /** The device restarted while the tab was open (its uptime went backwards). */
+  const [resetSeen, setResetSeen] = useState(false);
 
   const hist = useRef<History>(emptyHistory());
   const latch = useRef<Record<number, number>>({});
@@ -74,6 +82,44 @@ export default function PlungerTab({ dev, visible, onStatus }: Props) {
   wantPixels.current = !!cfg?.imageSensor && showPixels;
   const statusRef = useRef(onStatus);
   statusRef.current = onStatus;
+  const hwid = dev.ids?.hwid ?? null;
+
+  // ---- host-side calibration copy ----
+  const keepCal = useCallback(
+    (cal: PlungerCal, sensorType: number) => {
+      if (!hwid || !cal.calibrated) return;
+      plungerApi
+        .saveCalibration(hwid, sensorType, cal)
+        .then(setSavedCal)
+        .catch((e) => statusRef.current(`Couldn't keep a copy of the calibration on this computer: ${e}`));
+    },
+    [hwid],
+  );
+  const keepCalRef = useRef<(r: PlungerReading) => void>(() => {});
+  keepCalRef.current = (r) => cfg && keepCal(calFromReading(r), cfg.sensorType);
+
+  useEffect(() => {
+    setSavedCal(null);
+    setResetSeen(false);
+    if (hwid) plungerApi.savedCalibration(hwid).then(setSavedCal).catch(() => {});
+  }, [hwid]);
+
+  // ---- CSV capture (the Windows tool's columns) ----
+  const lastCapT = useRef(-1);
+  const rec = useRecorder<PlungerReading>((samples) => {
+    if (!samples.length) {
+      onStatus("Nothing recorded (no new readings).");
+      return;
+    }
+    const rows = samples.map((r) => [r.timestamp, r.rawPos, r.z0, r.z, r.speed, r.firingState, r.firingStateName]);
+    saveTextAs(toCsv(["timestamp", "sensor", "z0", "z", "speed", "firingState", "firingStateName"], rows), {
+      title: "Save plunger readings",
+      defaultName: stampedName(`${dev.ids?.unit_name ?? "pinscape"}-plunger`, "csv"),
+    })
+      .then((p) => onStatus(p ? `Saved ${samples.length} plunger readings to ${p}` : `Recording discarded (${samples.length} readings).`))
+      .catch((e) => onStatus(`Saving the readings failed: ${e}`));
+  });
+  const recPush = rec.push;
 
   // ---- configuration (re-read whenever the tab is shown: the config file may have changed) ----
   const loadConfig = useCallback(() => {
@@ -105,7 +151,14 @@ export default function PlungerTab({ dev, visible, onStatus }: Props) {
   const onReading = useCallback((r: PlungerReading, withPixels: boolean) => {
     const now = Date.now();
     const h = hist.current;
-    if (h.t.length && r.timestamp < h.t[h.t.length - 1]) Object.assign(h, emptyHistory()); // device rebooted
+    if (h.t.length && r.timestamp < h.t[h.t.length - 1]) {
+      Object.assign(h, emptyHistory()); // device rebooted
+      setResetSeen(true);
+    }
+    if (r.timestamp !== lastCapT.current) {
+      lastCapT.current = r.timestamp;
+      recPush(r);
+    }
     h.t.push(r.timestamp);
     h.z0.push(r.z0);
     h.z.push(r.z);
@@ -128,6 +181,7 @@ export default function PlungerTab({ dev, visible, onStatus }: Props) {
     } else if (!r.calibrating && calStartRef.current != null) {
       calStartRef.current = null;
       setCalStart(null);
+      if (r.calibrated) keepCalRef.current(r);
       statusRef.current(
         r.calibrated
           ? "Calibration finished. Try it out, then Save to keep it (or Revert)."
@@ -135,7 +189,7 @@ export default function PlungerTab({ dev, visible, onStatus }: Props) {
       );
     }
     setRd(r);
-  }, []);
+  }, [recPush]);
 
   useEffect(() => {
     if (!visible || !cfg?.configured || paused) return;
@@ -202,7 +256,27 @@ export default function PlungerTab({ dev, visible, onStatus }: Props) {
     if (prevCal) act("Restore calibration", () => plungerApi.setCalibration(key, prevCal), "Previous calibration restored (not saved yet).");
   };
 
-  const save = () => act("Save", () => plungerApi.commit(key), "Plunger settings and calibration saved to the Pico's flash.");
+  const save = () =>
+    act(
+      "Save",
+      async () => {
+        await plungerApi.commit(key);
+        if (rd && cfg) keepCal(calFromReading(rd), cfg.sensorType);
+      },
+      "Plunger settings and calibration saved to the Pico's flash.",
+    );
+
+  const restoreSaved = () => {
+    if (!savedCal) return;
+    act(
+      "Restore saved calibration",
+      async () => {
+        await plungerApi.setCalibration(key, savedCal.cal);
+        setResetSeen(false);
+      },
+      "Saved calibration restored (in effect now; click Save to store it on the Pico).",
+    );
+  };
 
   const revert = async () => {
     const ok = await confirm({
@@ -254,6 +328,8 @@ export default function PlungerTab({ dev, visible, onStatus }: Props) {
   const peakSpeed = peakForward(hist.current);
   const calElapsed = calStart != null ? Math.min(CAL_SECONDS, (now - calStart) / 1000) : 0;
   const isVcnl = cfg.sensorType === SENSOR.VCNL4010;
+  const canRestore =
+    !!savedCal && !!rd && savedCal.sensorType === cfg.sensorType && savedCal.cal.calibrated && !sameCal(savedCal.cal, calFromReading(rd));
 
   return (
     <div className="plunger">
@@ -278,6 +354,8 @@ export default function PlungerTab({ dev, visible, onStatus }: Props) {
         <button className="danger" onClick={restoreDefaults} disabled={busy || calibrating} title="Firmware defaults for calibration and all settings">
           Restore defaults
         </button>
+        <span className="sep" />
+        <RecordControls rec={rec} disabled={!rd || paused} what="the plunger readings" />
         <span className="spacer" />
         <label className="inline">
           <input type="checkbox" checked={paused} onChange={(e) => setPaused(e.target.checked)} /> Pause
@@ -288,6 +366,23 @@ export default function PlungerTab({ dev, visible, onStatus }: Props) {
       </div>
 
       {err && <p className="error">{err}</p>}
+
+      {canRestore && (resetSeen || !rd?.calibrated) && (
+        <div className="pl-banner pl-restore" role="status">
+          <div>
+            <strong>{resetSeen ? "The Pico restarted." : "The plunger isn't calibrated."}</strong> A calibration for this device
+            saved on this computer ({fmtSaved(savedCal!.savedAt)}) differs from the one in effect.
+          </div>
+          <div className="actions">
+            <button className="primary" onClick={restoreSaved} disabled={busy}>
+              Restore saved calibration
+            </button>
+            <button onClick={() => setResetSeen(false)} disabled={!resetSeen}>
+              Dismiss
+            </button>
+          </div>
+        </div>
+      )}
 
       {calibrating && (
         <div className="pl-banner" role="status">
@@ -499,7 +594,17 @@ export default function PlungerTab({ dev, visible, onStatus }: Props) {
                     Undo calibration
                   </button>
                 )}
+                {canRestore && !calibrating && (
+                  <button onClick={restoreSaved} disabled={busy} title="Put the calibration kept on this computer into effect">
+                    Restore saved calibration
+                  </button>
+                )}
               </div>
+              <p className="muted small">
+                {savedCal
+                  ? `This computer keeps a copy of the last calibration (${fmtSaved(savedCal.savedAt)}: min ${savedCal.cal.calMin}, zero ${savedCal.cal.calZero}, max ${savedCal.cal.calMax}), to restore after a reset.`
+                  : "A copy of each new calibration is kept on this computer, so it can be restored after a reset."}
+              </p>
             </>
           )}
         </section>
@@ -746,4 +851,9 @@ function NotConfigured({ onReload }: { onReload: () => void }) {
       </div>
     </div>
   );
+}
+
+function fmtSaved(iso: string): string {
+  const d = new Date(iso);
+  return isNaN(d.getTime()) ? iso : d.toLocaleString();
 }

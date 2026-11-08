@@ -11,7 +11,21 @@ See **[docs/PLAN.md](docs/PLAN.md)** for the full plan, architecture and phases.
 
 <img width="1553" height="831" alt="image" src="https://github.com/user-attachments/assets/6c248144-53a6-4120-a77e-aadf1c62a49b" />
 
-## Status: Phases 1–5 done (firmware update verified on an RP2040); Linux tested, Windows/macOS not yet
+## Installing
+
+Download the installer for your system from the
+**[Releases page](https://github.com/superhac/pinscape-cross/releases/latest)**:
+`.msi` or `-setup.exe` (Windows), `.dmg` (macOS, Apple silicon or Intel), `.deb`, `.rpm` or
+`.AppImage` (Linux). The `pinscape-cli-*` archives contain the command-line tool.
+On Linux the `.deb`/`.rpm` packages set up USB permissions; with the AppImage, install the
+udev rule by hand (see [Linux USB permissions](#linux-usb-permissions)).
+The app shows a notice when a new version is available.
+
+See the **[user guide](docs/USER_GUIDE.md)** for installation details per OS, first steps,
+config editing, firmware updates and troubleshooting. Maintainers: see
+[docs/RELEASING.md](docs/RELEASING.md) for making a release, and [CHANGELOG.md](CHANGELOG.md).
+
+## Status: Phases 1–6 built (firmware update verified on an RP2040); Linux tested, Windows/macOS not yet
 
 | Piece | State |
 |---|---|
@@ -49,6 +63,7 @@ the simulated device (`cargo test`), unless marked otherwise.
 - [x] Firmware update over USB (PICOBOOT) with `pinscape update`: erase, write, verify,
       reboot; config preserved byte-identical
 - [x] `.deb` / `.rpm` / AppImage build locally; `.deb` contents (udev rule, post-install script)
+- [x] Preferences dialog opens with Ctrl+, and closes with Esc; Ctrl+2 switches tabs (simulator)
 
 ### Still to test
 
@@ -60,6 +75,7 @@ the simulated device (`cargo test`), unless marked otherwise.
 - [ ] Overview buttons: Safe Mode, Factory Mode, Boot Loader, Erase Config
 - [ ] Two or more Picos connected at once (selection, `--id` in the CLI)
 - [ ] App's permission-help panel (unplug, remove the udev rule, replug)
+- [ ] **Print…** on the Config tab: line-numbered listing with header on Linux, Windows and macOS; app looks normal afterwards
 
 **Outputs** (needs an output wired, e.g. an LED + resistor on GP3)
 - [ ] Set a logical port level from the slider and 0/255 buttons
@@ -68,22 +84,26 @@ the simulated device (`cargo test`), unless marked otherwise.
       device returns to normal within 3 s if the app is closed
 - [ ] **All off**
 - [ ] Other output chips: TLC5940, TLC59116, TLC5947, PCA9685, PCA9555, 74HC595, PWMWorker
+- [ ] PWMWorker **Reset** / **Boot loader** buttons
 
 **Buttons** (needs wiring)
 - [ ] Real key / gamepad / XInput actions on the PC
 - [ ] Shift buttons and the shift-state display
 - [ ] PCA9555 and 74HC165 input grids
+- [ ] Button event log with `enableLogging: true` on a GPIO button: timestamps, hold times, Clear, CSV export
 
 **IR & TV-ON** (needs an IR receiver on `irRx` and an IR LED on `irTx`)
 - [ ] Receive codes from a remote; raw pulse timeline
 - [ ] Send a code, and re-send a received one
 - [ ] TV-ON power-sense cycle and relay On / Off / Pulse
+- [ ] IR raw pulse **Export CSV…**
 
 **Nudge** (needs an accelerometer: LIS3DH, MMA8451Q, MXC6655XA, MC3416 or LIS3DSH)
 - [ ] Live views and charts; "no accelerometer" detection
 - [ ] Center now; 15 s calibration (with and without "save when done")
 - [ ] Parameters: Apply, Save to device, Revert
 - [ ] Check the suspected firmware issue: velocity decay seems inverted vs. its documentation
+- [ ] **Record CSV** file opens in a spreadsheet
 
 **Plunger** (needs a sensor; a potentiometer on a Pico ADC pin is the simplest)
 - [ ] Live gauge, Z axis, firing state, chart
@@ -92,6 +112,7 @@ the simulated device (`cargo test`), unless marked otherwise.
 - [ ] Image sensors (TCD1103 / TSL1410R / TSL1412S) pixel view and integration time
 - [ ] Quadrature (AEDR8300) and proximity (VCNL4010 / VL6180X) sensors
 - [ ] Confirm calibration values are native sensor units (the header says 0–65535)
+- [ ] **Record CSV**; after a reset that loses settings, **Restore saved calibration** puts the calibration back
 
 **Firmware**
 - [ ] Install from the app's Firmware tab (file dialog and drag-and-drop, progress window,
@@ -101,6 +122,35 @@ the simulated device (`cargo test`), unless marked otherwise.
 - [ ] Pico 2 (RP2350): PICOBOOT reboot, family check
 - [ ] Mass-storage fallback (copy to the RPI-RP2 drive)
 - [ ] Wrong-chip image is refused (e.g. a `-pico2.uf2` on an RP2040)
+- [ ] Dropping a `.uf2` on any tab (not just Firmware) opens the install dialog; with two Picos the target picker works
+- [ ] **Erase Pinscape config** (boot loader): Pico restarts with factory defaults, firmware kept (RP2040 and RP2350)
+- [ ] **Erase entire flash**, from a running device and from a boot-loader Pico: Pico comes back in boot loader mode, detected flash size is right; reinstall firmware afterwards
+- [ ] `pinscape erase-flash --config --dry-run` with a Pico in boot loader mode lists the directory and files
+- [ ] Erase on a clone with 4 / 8 / 16 MB flash
+
+**Preferences, shortcuts & shell**
+- [ ] Preferences persist across restarts (`preferences.json` in the app config folder)
+- [ ] Theme Light / Dark / System: app, editor, log colors and window title bar follow; switching the OS theme while on System
+- [ ] Text size Small / Large; editor font size, tab size, insert spaces, minimap, word wrap apply live
+- [ ] Emacs keys (Linux/Windows, and real Control on macOS), incl. repeated Ctrl+K then Ctrl+Y; normal Ctrl+A / Ctrl+F when off
+- [ ] "Confirm before saving" off: a clean save goes straight through; a save with warnings still asks
+- [ ] Backups off: no backup written and the message says so; retention removes old backups on the next save
+- [ ] Last tab and device restored at startup
+- [ ] About: version, upstream revision, links open in the browser; **Check for updates** message
+- [ ] Help tab / reference pane: https and mjrnet.org links open in the browser; links between help pages stay in the frame
+- [ ] All shortcuts (list in Help › Keyboard shortcuts), incl. F1 with and without editor focus, Ctrl+Shift+R confirmation, Cmd on macOS
+- [ ] Tab bar arrow / Home / End keys; keyboard focus outlines; Esc closes the topmost dialog first
+- [ ] Boot-loader Pico with no Pinscape device: the sidebar doesn't say "No devices"
+
+**Releases & auto-update** (need a tagged release; see [docs/RELEASING.md](docs/RELEASING.md))
+- [ ] Tag push creates one draft release; all four build jobs (Linux, Windows, macOS arm64 and x64) upload into it
+- [ ] Draft contains the `.deb`, `.rpm`, AppImage, `.msi`, NSIS `.exe`, both `.dmg`s and the CLI archives
+- [ ] macOS ad-hoc signing works for both architectures
+- [ ] With the updater key and pubkey set: `.sig` files and `latest.json` (all platforms, `/download/vX.Y.Z/` URLs); with only one of them set the build fails
+- [ ] End to end: install 0.x.0, publish 0.x.1, the notice appears, Install and restart works (AppImage, NSIS, MSI, macOS); `.deb`/`.rpm` show **Download…**
+- [ ] A manual workflow run without a tag only uploads workflow artifacts
+- [ ] Optional code signing with real certificates (Apple Developer ID + notarization, Windows `.pfx`)
+- [ ] Linux CI and release builds work with the trimmed build packages (no `libxdo-dev`, `libssl-dev`, `libayatana-appindicator3-dev`)
 
 **Platforms & packaging**
 - [ ] First green CI run on Ubuntu, Windows and macOS
@@ -136,8 +186,15 @@ Tested on Debian 13 (trixie). Run these from the repository root.
 
 ```bash
 sudo apt install libwebkit2gtk-4.1-dev build-essential curl wget file \
-  libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config
+  librsvg2-dev pkg-config
 ```
+
+`libwebkit2gtk-4.1-dev` (WebKitGTK, which also pulls in GTK) is the only library the app
+links against; `curl`, `wget`, `file` and `librsvg2-dev` are used when packaging (the AppImage
+step). Tauri's generic Linux list also names `libxdo-dev`, `libssl-dev` and
+`libayatana-appindicator3-dev`: this app needs none of them (no native menus, no OpenSSL, no
+tray icon). Installed packages only need the runtime libraries `libwebkit2gtk-4.1-0` and
+`libgtk-3-0`, which the `.deb` declares as dependencies.
 
 **2. Node.js and npm** (for the UI). Debian packages `npm` separately from `nodejs`:
 

@@ -131,6 +131,11 @@ impl Default for State {
                 RawDevDesc { addr: 0, num_ports: 16, num_ports_per_chip: 8, pwm_res: 2, config_index: 0, dev_type: dt::HC595 },
                 vec![pt::DIGITAL; 16],
             ),
+            // A PWMWorker Pico (workerPico[0]) on I2C1 0x30, with two ports in use.
+            MockOutDev::new(
+                RawDevDesc { addr: 0x130, num_ports: 24, num_ports_per_chip: 24, pwm_res: 256, config_index: 0, dev_type: dt::PWMWORKER },
+                [vec![pt::PWM; 2], vec![pt::UNUSED; 22]].concat(),
+            ),
         ];
         State {
             ports,
@@ -369,7 +374,7 @@ mod tests {
         assert_eq!(c.query_logical_port_name(3).unwrap(), "Knocker");
 
         let devs = c.query_output_devices_full().unwrap();
-        assert_eq!(devs.len(), 4);
+        assert_eq!(devs.len(), 5);
         assert_eq!(devs[0].dev_type_name, "GPIO");
         assert_eq!(devs[0].port_types[15], pt::PWM);
         assert_eq!(devs[0].port_types[17], pt::DIGITAL);
@@ -378,6 +383,8 @@ mod tests {
         assert_eq!(devs[1].first_port, 30);
         assert_eq!((devs[2].i2c_bus, devs[2].i2c_addr), (Some(0), Some(0x40)));
         assert_eq!(devs[3].dev_type_name, "74HC595");
+        assert_eq!((devs[4].dev_type_name, devs[4].config_index), ("PWMWorker", 0));
+        assert_eq!((devs[4].i2c_bus, devs[4].i2c_addr), (Some(1), Some(0x30)));
         let total: usize = devs.iter().map(|d| d.num_ports as usize).sum();
         assert_eq!(c.query_device_port_levels().unwrap().len(), total);
     }

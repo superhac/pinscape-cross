@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { DeviceSnapshot } from "../api";
 import {
+  DEV,
   deviceLabel,
   LogicalPort,
   mappingLabel,
@@ -217,6 +218,25 @@ export default function OutputsTab({ dev, visible, onStatus }: Props) {
     send(k, () => outputsApi.setDevicePort(key, d.devType, d.configIndex, port, level));
   };
 
+  const resetWorker = async (d: OutputDevice, bootloader: boolean) => {
+    const name = deviceLabel(d);
+    const ok = await confirm({
+      title: bootloader ? `Boot loader: ${name}` : `Reset ${name}`,
+      body: bootloader
+        ? `Restart the PWMWorker Pico ${name} in its boot loader (BOOTSEL mode)? Its outputs stop until it's restarted, ` +
+          "e.g. by installing PWMWorker firmware onto it (it appears in the sidebar under 'Boot loader mode' if it's " +
+          "connected to this computer by USB), or by power-cycling it."
+        : `Reboot the PWMWorker Pico ${name}? Its outputs switch off briefly while it restarts; Pinscape reconnects to it afterwards.`,
+      ok: bootloader ? "Enter boot loader" : "Reset",
+      danger: true,
+    });
+    if (!ok) return;
+    outputsApi
+      .pwmWorkerReset(key, d.configIndex, bootloader)
+      .then(() => onStatus(bootloader ? `${name} restarted in boot loader mode.` : `${name} reset.`))
+      .catch((e) => onStatus(`${name}: ${e}`));
+  };
+
   // physical port -> logical ports mapped to it
   const reverseMap = useMemo(() => {
     const m = new Map<string, LogicalPort[]>();
@@ -335,6 +355,7 @@ export default function OutputsTab({ dev, visible, onStatus }: Props) {
                 reverseMap={reverseMap}
                 shown={shown}
                 setPhysical={setPhysical}
+                onWorkerReset={d.devType === DEV.PWMWORKER ? (bl) => resetWorker(d, bl) : undefined}
               />
             ))}
           </div>
@@ -461,7 +482,10 @@ function DeviceCard({
   reverseMap,
   shown,
   setPhysical,
+  onWorkerReset,
 }: {
+  /** PWMWorker only: reboot it (or into its boot loader). */
+  onWorkerReset?: (bootloader: boolean) => void;
   d: OutputDevice;
   levels: number[] | undefined;
   enabled: boolean;
@@ -477,7 +501,19 @@ function DeviceCard({
   const res = d.pwmRes <= 2 ? "digital (on/off)" : `PWM 0–${d.pwmRes - 1}`;
   return (
     <section className="card out-dev">
-      <h3>{deviceLabel(d)}</h3>
+      <h3>
+        {deviceLabel(d)}
+        {onWorkerReset && (
+          <span className="out-worker-btns">
+            <button className="small-btn" onClick={() => onWorkerReset(false)} title="Reboot this PWMWorker Pico">
+              Reset
+            </button>
+            <button className="small-btn danger" onClick={() => onWorkerReset(true)} title="Restart this PWMWorker Pico in its boot loader, e.g. to update its firmware">
+              Boot loader
+            </button>
+          </span>
+        )}
+      </h3>
       <div className="out-devinfo small muted">
         <span>{d.devTypeName}</span>
         <span>config #{d.configIndex}</span>

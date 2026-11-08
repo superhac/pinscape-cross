@@ -84,6 +84,9 @@ export const outputsApi = {
     invoke<void>("outputs_set_device_port", { key, devType, configIndex, port, level }),
   setNightMode: (key: string, on: boolean) => invoke<void>("outputs_set_night_mode", { key, on }),
   allOff: (key: string) => invoke<void>("outputs_all_off", { key }),
+  /** Reboot PWMWorker `worker` (its configIndex), optionally into its boot loader. */
+  pwmWorkerReset: (key: string, worker: number, bootloader: boolean) =>
+    invoke<void>("outputs_pwm_worker_reset", { key, worker, bootloader }),
 };
 
 /** Highest native level for a device port (digital ports are 0/1). */

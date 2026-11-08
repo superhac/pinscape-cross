@@ -10,10 +10,12 @@ import {
   ButtonsLive,
   buttonsApi,
   buttonTypeName,
+  FLAG_EVENTLOG,
   pcaPortName,
   SRC,
   sourceLabel,
 } from "../lib/api-buttons";
+import { saveTextAs, stampedName, toCsv } from "../lib/api-export";
 import "./ButtonsTab.css";
 
 interface Props {
@@ -150,6 +152,8 @@ export default function ButtonsTab({ dev, visible, onStatus }: Props) {
         </span>
       </div>
       {err && <p className="error">{err}</p>}
+
+      <EventLogPanel dev={dev} buttons={buttons} active={visible && !paused} onStatus={onStatus} />
 
       {shiftButtons.length > 0 && (
         <section className="card">
@@ -334,5 +338,205 @@ function PinCell({
       </div>
       {used && <div className="pin-users">{users!.map((i) => `#${i}`).join(" ")}</div>}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Button event log (GPIO edge timestamps, for latency / bounce measurement)
+// ---------------------------------------------------------------------------
+
+const EVENT_POLL_MS = 200;
+const MAX_EVENTS = 500;
+
+interface LoggedEvent {
+  gpio: number;
+  /** µs since the Pico's reset. */
+  t: number;
+  pressed: boolean;
+  /** µs since the previous event on the same GPIO (null for the first one seen). */
+  dt: number | null;
+}
+
+const fmtT = (us: number) => (us / 1e6).toFixed(6);
+const fmtMs = (us: number | null) => (us == null ? "—" : (us / 1000).toFixed(us < 10_000 ? 3 : 1));
+
+function EventLogPanel({
+  dev,
+  buttons,
+  active,
+  onStatus,
+}: {
+  dev: DeviceSnapshot;
+  buttons: ButtonDesc[];
+  active: boolean;
+  onStatus: (s: string) => void;
+}) {
+  const gpios = useMemo(
+    () =>
+      [...new Set(buttons.filter((b) => b.sourceType === SRC.GPIO && (b.flags & FLAG_EVENTLOG) !== 0).map((b) => b.sourcePort))].sort(
+        (a, b) => a - b,
+      ),
+    [buttons],
+  );
+  const [events, setEvents] = useState<LoggedEvent[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+  const last = useRef(new Map<number, number>());
+  const busy = useRef(false);
+  const key = dev.key;
+
+  useInterval(
+    () => {
+      if (busy.current) return;
+      busy.current = true;
+      buttonsApi
+        .eventLog(key, gpios)
+        .then((res) => {
+          setErr(null);
+          const fresh: LoggedEvent[] = [];
+          for (const g of res) {
+            for (const e of g.events ?? []) {
+              const prev = last.current.get(g.gpio);
+              // a timestamp going backwards means the Pico restarted
+              const dt = prev != null && e.t >= prev ? e.t - prev : null;
+              last.current.set(g.gpio, e.t);
+              fresh.push({ gpio: g.gpio, t: e.t, pressed: e.pressed, dt });
+            }
+          }
+          if (fresh.length) {
+            fresh.sort((a, b) => a.t - b.t);
+            setEvents((old) => [...old, ...fresh].slice(-MAX_EVENTS));
+          }
+        })
+        .catch((e) => setErr(String(e)))
+        .finally(() => (busy.current = false));
+    },
+    EVENT_POLL_MS,
+    active && gpios.length > 0,
+  );
+
+  const clear = () => {
+    buttonsApi
+      .clearEventLog(key, null)
+      .then(() => {
+        setEvents([]);
+        last.current.clear();
+        onStatus("Button event log cleared.");
+      })
+      .catch((e) => onStatus(`Clearing the event log failed: ${e}`));
+  };
+
+  const exportCsv = () => {
+    const rows = events.map((e) => [e.gpio, e.pressed ? "press" : "release", e.t, e.dt ?? ""]);
+    saveTextAs(toCsv(["gpio", "event", "t_us", "since_previous_us"], rows), {
+      title: "Export button event log",
+      defaultName: stampedName(`${dev.ids?.unit_name ?? "pinscape"}-button-events`, "csv"),
+    })
+      .then((p) => p && onStatus(`Exported ${events.length} events to ${p}`))
+      .catch((e) => onStatus(`Export failed: ${e}`));
+  };
+
+  if (gpios.length === 0) {
+    return (
+      <section className="card">
+        <h3>Event log</h3>
+        <p className="small muted legend">
+          No button has event logging enabled. To record exact press/release times (for measuring latency or switch
+          bounce), add <code>enableLogging: true</code> to a GPIO button's <code>source</code> in the config, e.g.{" "}
+          <code>source: {"{"} type: "gpio", gp: 4, enableLogging: true {"}"}</code>, save and reboot.
+        </p>
+      </section>
+    );
+  }
+
+  // per-GPIO summary
+  const stats = gpios.map((g) => {
+    const ev = events.filter((e) => e.gpio === g);
+    const held = ev.filter((e) => !e.pressed && e.dt != null).map((e) => e.dt!);
+    const gaps = ev.filter((e) => e.pressed && e.dt != null).map((e) => e.dt!);
+    const users = buttons.map((b, i) => (b.sourceType === SRC.GPIO && b.sourcePort === g ? `#${i}` : null)).filter(Boolean);
+    return {
+      g,
+      users: users.join(" "),
+      presses: ev.filter((e) => e.pressed).length,
+      lastHeld: held.length ? held[held.length - 1] : null,
+      minHeld: held.length ? Math.min(...held) : null,
+      minGap: gaps.length ? Math.min(...gaps) : null,
+    };
+  });
+  const recent = events.slice(-60).reverse();
+
+  return (
+    <section className="card">
+      <h3>
+        Event log
+        <span className="small muted plain">GPIO edges timestamped by the Pico's interrupt handler (µs since reset)</span>
+        <span className="spacer" />
+        <button className="small-btn" onClick={exportCsv} disabled={!events.length}>
+          Export CSV…
+        </button>
+        <button className="small-btn" onClick={clear} title="Clear the Pico's buffers and this list">
+          Clear
+        </button>
+      </h3>
+      {err && <p className="error small">{err}</p>}
+      <div className="table-scroll">
+        <table className="grid evlog-summary">
+          <thead>
+            <tr>
+              <th>GPIO</th>
+              <th>Buttons</th>
+              <th>Presses</th>
+              <th>Last held (ms)</th>
+              <th>Shortest held (ms)</th>
+              <th title="Shortest time from a release to the next press; very short gaps suggest switch bounce">Shortest gap (ms)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {stats.map((s) => (
+              <tr key={s.g}>
+                <td>GP{s.g}</td>
+                <td className="muted">{s.users}</td>
+                <td>{s.presses}</td>
+                <td>{fmtMs(s.lastHeld)}</td>
+                <td>{fmtMs(s.minHeld)}</td>
+                <td>{fmtMs(s.minGap)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {events.length === 0 ? (
+        <p className="small muted legend">Waiting for button presses on {gpios.map((g) => `GP${g}`).join(", ")}…</p>
+      ) : (
+        <div className="table-scroll evlog-scroll">
+          <table className="grid evlog">
+            <thead>
+              <tr>
+                <th>GPIO</th>
+                <th>Event</th>
+                <th>Pico time (s)</th>
+                <th>Since previous (ms)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {recent.map((e, i) => (
+                <tr key={`${e.gpio}:${e.t}:${i}`} className={e.pressed ? "on" : ""}>
+                  <td>GP{e.gpio}</td>
+                  <td>{e.pressed ? "press" : "release"}</td>
+                  <td className="mono">{fmtT(e.t)}</td>
+                  <td className="mono" title={e.dt == null ? undefined : e.pressed ? "released for" : "held for"}>
+                    {fmtMs(e.dt)} {e.dt != null && <span className="muted small">{e.pressed ? "released" : "held"}</span>}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <p className="small muted legend">
+        The Pico keeps the latest 63 edges per GPIO; this list shows the newest 60 of the last {MAX_EVENTS} collected.
+        Hold times and gaps show switch bounce and debouncing; for end-to-end latency, compare these times with input timestamps recorded on the host.
+      </p>
+    </section>
   );
 }
