@@ -285,7 +285,7 @@ Estimates assume one experienced developer; ranges reflect unknowns.
 
 ### Phase 0 — Scaffold & toolchain (2–3 days) ✅ done (2026-11-08)
 - Workspace, crates, Tauri app, React UI skeleton, udev rule, CI matrix (GitHub Actions:
-  ubuntu-22.04, windows-latest, macos-14).
+  ubuntu-24.04, windows-latest, macos-latest).
 - **Exit**: `cargo tauri dev` opens a window on all three OSes; `cargo test` green.
 
 ### Phase 1 — Protocol core + Overview (2–3 weeks) ✅ done on Linux (2026-11-08); Windows/macOS pending a CI run and a hardware test
