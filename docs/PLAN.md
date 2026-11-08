@@ -1,4 +1,4 @@
-# Pinscape Tauri — Cross-Platform Config Tool: Project Plan
+# PinScape-Cross — Cross-Platform Config Tool: Project Plan
 
 Status: **Draft v1** (2026-11-08)
 Target: feature parity with the Windows *Pinscape Pico GUI Config Tool*, running on
@@ -262,7 +262,7 @@ guard · Print (via webview print).
 ## 7. Repository layout
 
 ```
-pinscape-tauri/
+pinscape-cross/
 ├─ docs/PLAN.md                ← this file
 ├─ Cargo.toml                  Rust workspace
 ├─ crates/
@@ -407,7 +407,7 @@ mismatched family IDs; config save refuses syntax errors.
 ---
 
 ## 13. Open questions
-1. App name / branding (working name: **Pinscape Tauri**). Must not imply it's the official tool
+1. ~~App name~~ Decided: **PinScape-Cross** (2026-11-08). Must not imply it's the official tool
    unless upstream adopts it.
 2. Upstream relationship: contribute back (schema JSON output, Rust crates) or stay separate?
 3. Keep the help as upstream HTML, or convert to Markdown for easier theming?

@@ -2352,15 +2352,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "pinscape-protocol"
-version = "0.1.0"
-dependencies = [
- "serde",
- "thiserror 2.0.21",
-]
-
-[[package]]
-name = "pinscape-tauri"
+name = "pinscape-cross"
 version = "0.1.0"
 dependencies = [
  "chrono",
@@ -2373,6 +2365,14 @@ dependencies = [
  "tauri-build",
  "tauri-plugin-dialog",
  "tokio",
+]
+
+[[package]]
+name = "pinscape-protocol"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.21",
 ]
 
 [[package]]

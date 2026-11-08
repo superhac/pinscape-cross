@@ -1,12 +1,12 @@
 [package]
-name = "pinscape-tauri"
+name = "pinscape-cross"
 description = "Cross-platform Pinscape Pico config tool"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [lib]
-name = "pinscape_tauri_lib"
+name = "pinscape_cross_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
