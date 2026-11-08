@@ -74,6 +74,8 @@ enum Command {
     },
     /// Set the device's wall clock to this computer's local time
     SetClock,
+    /// Check a config file offline (same parser and rules check as the editor)
+    Validate { file: PathBuf },
     /// Reboot the device
     Reset {
         /// normal | safe-mode | bootloader | factory
@@ -253,6 +255,23 @@ fn run(cli: Cli) -> Res {
                     None if follow => std::thread::sleep(Duration::from_millis(250)),
                     None => break,
                 }
+            }
+        }
+        Command::Validate { file } => {
+            let text = std::fs::read_to_string(&file)?;
+            let diags = pinscape_config::validate(&text);
+            for d in &diags {
+                let sev = match d.severity {
+                    pinscape_config::Severity::Error => "error",
+                    pinscape_config::Severity::Warning => "warning",
+                    pinscape_config::Severity::Info => "info",
+                };
+                println!("{}:{}:{}: {sev}: {}", file.display(), d.range.start_line, d.range.start_col, d.message);
+            }
+            let errors = diags.iter().filter(|d| d.severity == pinscape_config::Severity::Error).count();
+            println!("{} error(s), {} warning(s)", errors, diags.len() - errors);
+            if errors > 0 {
+                return Err("the device can't use a file with syntax errors".into());
             }
         }
         Command::SetClock => {

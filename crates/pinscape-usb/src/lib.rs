@@ -21,6 +21,10 @@ pub use nusb::DeviceId;
 
 pub mod mock;
 
+mod buttons;
+mod ir;
+mod outputs;
+
 /// Default timeout for a single USB transfer.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(2);
 

@@ -9,15 +9,16 @@ See **[docs/PLAN.md](docs/PLAN.md)** for the full plan, architecture and phases.
 
 > Unofficial project; not affiliated with the upstream Pinscape Pico project.
 
-## Status: Phase 2 (config editor) done; Linux tested, Windows/macOS not yet
+## Status: Phase 3 (live testers) done; Linux tested, Windows/macOS not yet
 
 | Piece | State |
 |---|---|
 | `pinscape-protocol` (wire format) | Request/response, version, IDs, stats, USB interfaces, GPIO, clock, log, config paging, CRC-32; unit-tested |
 | `pinscape-usb` (nusb transport) | Discovery by interface string, stream-based request/response, config get/put/exists/erase, stats, GPIO, log, clock, reset. **Tested on hardware.** Includes a simulated device (`mock.rs`) used by the tests |
 | `pinscape-config` | Port of the firmware's JSON parser (same syntax, error messages and recovery); schema checker matching the Windows tool's rules check; cursor context for completion, hover and breadcrumbs. All five upstream templates validate with zero findings; differential-tested against the firmware's own parser (`tools/json-diff`) |
-| `pinscape` CLI | `list`, `info`, `stats`, `usb`, `gpio`, `get-config`, `put-config`, `erase-config`, `log [-f]`, `set-clock`, `reset` |
+| `pinscape` CLI | `list`, `info`, `stats`, `usb`, `gpio`, `get-config`, `put-config`, `erase-config`, `log [-f]`, `set-clock`, `reset`, `validate <file>` (offline config check) |
 | Tauri app | Hot-plug device manager; Overview; **Config and Safe-Mode Config in a Monaco editor**: Pinscape JSON highlighting, live syntax errors and rules warnings, schema-driven autocomplete (including subclass properties such as `source: { type: "gpio", ... }`), hover docs, breadcrumb bar, F1 opens the upstream reference beside the editor, Problems list, save blocked on syntax errors and confirmed on warnings, Ctrl+S; import/export and templates; edits survive tab switches; prompt before closing with unsaved edits; automatic backup of every save with restore. Help tab with the upstream help pages. Log viewer; help for permission/"in use" errors |
+| Live testers | **Buttons** (logical buttons with live state, shift state, GPIO / PCA9555 / 74HC165 input grids), **Outputs** (logical ports with DOF/computed/output levels and sliders, physical device ports, night mode, test mode with device-side timeout and keepalive, all off), **IR & TV-ON** (received codes in the config's text format, raw pulse timeline, send, TV-ON state and relay control) |
 | CI | GitHub Actions: build, test and clippy on Ubuntu, Windows and macOS |
 
 The vendor interface is **exclusive**: close the app before using the CLI
@@ -124,7 +125,9 @@ Environment variables:
 
 - `PINSCAPE_TRACE=1` logs USB reads.
 - `PINSCAPE_MOCK=1` adds a simulated device to the app, for UI work without a Pico:
-  `PINSCAPE_MOCK=1 npm run tauri dev`
+  `PINSCAPE_MOCK=1 npm run tauri dev`. The simulator has buttons, outputs and IR activity.
+- `PINSCAPE_START_TAB=<tab>` and `PINSCAPE_START_DEVICE=<hardware ID>` choose the
+  tab and device shown at startup (e.g. `PINSCAPE_START_DEVICE=DEADBEEF00000001` for the simulator).
 
 ### Parser differential test
 

@@ -15,6 +15,10 @@ use pinscape_protocol::{self as proto, cmd, Request, Status, ARGS_LEN, REQUEST_L
 
 use crate::{Error, Result, Transport};
 
+mod buttons;
+mod ir;
+mod outputs;
+
 /// Simulated device state, shared between the transport and the test.
 #[derive(Debug, Clone)]
 pub struct MockState {
@@ -39,6 +43,10 @@ pub struct MockState {
     started: Instant,
     // config PUT in progress: (file id, total pages, crc, received pages)
     put: Option<(u8, u16, u32, Vec<u8>, u16)>,
+    /// Phase 3 feature state (see mock/buttons.rs, mock/outputs.rs, mock/ir.rs).
+    pub buttons: buttons::State,
+    pub outputs: outputs::State,
+    pub ir: ir::State,
 }
 
 impl Default for MockState {
@@ -59,6 +67,9 @@ impl Default for MockState {
             requests: Vec::new(),
             started: Instant::now(),
             put: None,
+            buttons: Default::default(),
+            outputs: Default::default(),
+            ir: Default::default(),
         }
     }
 }
@@ -84,7 +95,7 @@ impl MockDevice {
         self.state.clone()
     }
 
-    fn reply(&mut self, token: u32, cmd: u8, status: Status, args: &[u8], data: &[u8]) {
+    pub(crate) fn reply(&mut self, token: u32, cmd: u8, status: Status, args: &[u8], data: &[u8]) {
         let mut b = [0u8; RESPONSE_LEN];
         b[0..4].copy_from_slice(&token.to_le_bytes());
         b[4] = cmd;
@@ -174,20 +185,39 @@ impl MockDevice {
                 self.reply(t, c, Status::Ok, &[], &d);
             }
             cmd::QUERY_GPIO_CONFIG => {
-                // 30 ports, GP25 = Pico LED output, GP2 = button input
+                // Matches the simulated buttons in mock/buttons.rs (GP4-GP8) and
+                // IR receiver/transmitter in mock/ir.rs (same usage names as the
+                // firmware's GPIO manager), plus the Pico LED on GP25.
+                const USES: [(usize, &str); 7] = [
+                    (4, "Button #0"),
+                    (5, "Button #1"),
+                    (6, "Button #2"),
+                    (7, "Button #4"),
+                    (8, "Button #5"),
+                    (9, "IR RX"),
+                    (10, "IR TX"),
+                ];
                 let n = 30usize;
+                let mut pool: Vec<u8> = Vec::new();
+                let mut ports: Vec<u8> = Vec::new();
                 let pool_at = 6 + n * 4;
-                let mut d = vec![6, 0, 4, 0, n as u8, 0];
                 for i in 0..n {
-                    let (func, flags, ofs) = match i {
-                        2 => (5u8, 0u8, pool_at as u16),
-                        25 => (5, 1, 0),
-                        _ => (0x1F, 0, 0),
+                    let (func, flags, ofs) = match USES.iter().find(|(g, _)| *g == i) {
+                        Some((_, name)) => {
+                            let ofs = (pool_at + pool.len()) as u16;
+                            pool.extend_from_slice(name.as_bytes());
+                            pool.push(0);
+                            (5u8, 0u8, ofs)
+                        }
+                        None if i == 25 => (5, 1, 0),
+                        None => (0x1F, 0, 0),
                     };
-                    d.extend_from_slice(&[func, flags]);
-                    d.extend_from_slice(&ofs.to_le_bytes());
+                    ports.extend_from_slice(&[func, flags]);
+                    ports.extend_from_slice(&ofs.to_le_bytes());
                 }
-                d.extend_from_slice(b"Button #0\0");
+                let mut d = vec![6, 0, 4, 0, n as u8, 0];
+                d.extend_from_slice(&ports);
+                d.extend_from_slice(&pool);
                 self.reply(t, c, Status::Ok, &[], &d);
             }
             cmd::SET_CLOCK => {
@@ -216,6 +246,9 @@ impl MockDevice {
                 }
             }
             cmd::CONFIG => self.handle_config(t, a, xfer),
+            cmd::BUTTONS => buttons::handle(self, t, c, a, xfer),
+            cmd::OUTPUTS => outputs::handle(self, t, c, a, xfer),
+            cmd::QUERY_IR | cmd::SEND_IR | cmd::TVON => ir::handle(self, t, c, a, xfer),
             cmd::RESET => {
                 let mut st = self.state.lock().unwrap();
                 st.last_reset = Some(arg(0));
@@ -410,7 +443,8 @@ mod tests {
         assert!(c.query_usb_interfaces().unwrap().keyboard_enabled);
         let gpio = c.query_gpio_config().unwrap();
         assert_eq!(gpio.len(), 30);
-        assert_eq!(gpio[2].usage.as_deref(), Some("Button #0"));
+        assert_eq!(gpio[4].usage.as_deref(), Some("Button #0"));
+        assert_eq!(gpio[8].usage.as_deref(), Some("Button #5"));
         let t = proto::ClockArgs { year: 2026, month: 11, day: 8, hour: 1, minute: 2, second: 3 };
         c.set_clock(t).unwrap();
         assert_eq!(h.lock().unwrap().clock, Some(t));

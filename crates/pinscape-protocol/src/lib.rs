@@ -354,6 +354,10 @@ impl ConfigArgs {
     }
 }
 
+pub mod buttons;
+pub mod ir;
+pub mod outputs;
+
 /// Subcommands for [`cmd::STATS`].
 pub mod stats {
     pub const QUERY_STATS: u8 = 0x01;

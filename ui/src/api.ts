@@ -165,7 +165,7 @@ export const api = {
   listBackups: (hwid: string, safeMode: boolean) => invoke<BackupInfo[]>("list_backups", { hwid, safeMode }),
   readBackup: (file: string) => invoke<string>("read_backup", { file }),
   backupFolder: () => invoke<string>("backup_folder"),
-  devOptions: () => invoke<{ startTab: string | null }>("dev_options"),
+  devOptions: () => invoke<{ startTab: string | null; startDevice: string | null }>("dev_options"),
   configValidate: (text: string) => invoke<Diagnostic[]>("config_validate", { text }),
   configCompletions: (text: string, line: number, col: number) =>
     invoke<Completion[]>("config_completions", { text, line, col }),

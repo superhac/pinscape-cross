@@ -54,6 +54,11 @@ jobs:
       - name: Build CLI (release)
         run: cargo build --release -p pinscape-cli
 
+      # Desktop app installers: .deb/.rpm/.AppImage (Linux), .msi/.exe (Windows),
+      # .dmg (macOS). Unsigned for now.
+      - name: Package desktop app
+        run: npm run tauri build
+
       - uses: actions/upload-artifact@v4
         with:
           name: pinscape-cli-${{ runner.os }}
@@ -61,3 +66,15 @@ jobs:
             target/release/pinscape
             target/release/pinscape.exe
           if-no-files-found: ignore
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: pinscape-tauri-${{ runner.os }}
+          path: |
+            target/release/bundle/deb/*.deb
+            target/release/bundle/rpm/*.rpm
+            target/release/bundle/appimage/*.AppImage
+            target/release/bundle/msi/*.msi
+            target/release/bundle/nsis/*.exe
+            target/release/bundle/dmg/*.dmg
+          if-no-files-found: error

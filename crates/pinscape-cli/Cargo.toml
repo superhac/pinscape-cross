@@ -12,5 +12,6 @@ path = "src/main.rs"
 [dependencies]
 pinscape-protocol.workspace = true
 pinscape-usb.workspace = true
+pinscape-config.workspace = true
 clap = { version = "4", features = ["derive"] }
 chrono.workspace = true

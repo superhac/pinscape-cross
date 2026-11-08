@@ -318,7 +318,16 @@ Original scope:
 - Help pane with upstream HTML.
 - **Exit**: a user can do everything in the Windows Config Editor, on Linux and macOS.
 
-### Phase 3 — Live testers: Buttons, Outputs, IR (2–3 weeks)
+### Phase 3 — Live testers: Buttons, Outputs, IR (2–3 weeks) ✅ done on Linux (2026-11-08)
+
+Built in parallel by three agents (one per feature, each in its own repo copy and own files),
+then merged. On real hardware: Buttons tab verified live (BOOTSEL press and GP2 pull-up read
+correctly); Outputs and IR tabs verified reading config/levels/state. Not yet verified on
+hardware: setting output levels, test mode, sending/receiving IR (needs `irRx`/`irTx` wiring),
+TV-ON relay. Deferred: button event log (latency measurement), IR pulse export, PWMWorker reset UI.
+
+Original scope:
+
 - Streams infrastructure (start/stop per visible tab, throttled events).
 - Button tester (logical + GPIO/shift-register/expander inputs).
 - Output tester (logical/physical, test mode, sliders, night mode). **Always exit test

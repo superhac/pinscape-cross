@@ -9,11 +9,14 @@ import ConfigTab from "./tabs/ConfigTab";
 import LogTab from "./tabs/LogTab";
 import DeviceProblem from "./lib/DeviceProblem";
 import HelpTab from "./tabs/HelpTab";
+import ButtonsTab from "./tabs/ButtonsTab";
+import OutputsTab from "./tabs/OutputsTab";
+import IrTab from "./tabs/IrTab";
 
 // Tabs planned per docs/PLAN.md §3.
 const TABS = ["Overview", "Config", "Safe-Mode Config", "Log", "Buttons", "Outputs", "Nudge", "Plunger", "IR", "Firmware", "Help"] as const;
 type Tab = (typeof TABS)[number];
-const READY: Tab[] = ["Overview", "Config", "Safe-Mode Config", "Log", "Help"];
+const READY: Tab[] = ["Overview", "Config", "Safe-Mode Config", "Log", "Buttons", "Outputs", "IR", "Help"];
 
 export default function App() {
   const devices = useDevices();
@@ -54,6 +57,7 @@ export default function App() {
     api.devOptions().then((o) => {
       const t = TABS.find((x) => x.toLowerCase() === o.startTab?.toLowerCase());
       if (t) setTab(t);
+      if (o.startDevice) setSelected(o.startDevice);
     });
   }, []);
 
@@ -116,6 +120,9 @@ export default function App() {
               )}
               {/* The log stays mounted so it keeps collecting while other tabs are shown. */}
               <LogTab key={dev.key + ":log"} dev={dev} visible={tab === "Log"} />
+              <ButtonsTab key={dev.key + ":buttons"} dev={dev} visible={tab === "Buttons"} onStatus={setStatus} />
+              <OutputsTab key={dev.key + ":outputs"} dev={dev} visible={tab === "Outputs"} onStatus={setStatus} />
+              <IrTab key={dev.key + ":ir"} dev={dev} visible={tab === "IR"} onStatus={setStatus} />
               {!READY.includes(tab) && (
                 <div className="empty">
                   <p className="muted">{tab}: coming in a later phase (see docs/PLAN.md §8).</p>

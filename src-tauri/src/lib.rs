@@ -4,7 +4,10 @@
 //! thread per attached device and pushes `devices-changed` events on hot-plug.
 //! Commands are addressed by device key (the hardware ID).
 
+mod buttons;
 mod files;
+mod ir;
+mod outputs;
 mod session;
 
 use pinscape_protocol::{config, reset, GpioPort, Statistics, UsbInterfaces};
@@ -152,10 +155,14 @@ async fn set_clock(mgr: State<'_, Manager>, key: String) -> Res<()> {
 }
 
 /// Development/automation options from the environment.
-/// `PINSCAPE_START_TAB=Config` opens that tab at startup (handy for screenshots).
+/// `PINSCAPE_START_TAB=Config` opens that tab at startup, and
+/// `PINSCAPE_START_DEVICE=<hwid>` selects that device (handy for screenshots).
 #[tauri::command]
 fn dev_options() -> serde_json::Value {
-    serde_json::json!({ "startTab": std::env::var("PINSCAPE_START_TAB").ok() })
+    serde_json::json!({
+        "startTab": std::env::var("PINSCAPE_START_TAB").ok(),
+        "startDevice": std::env::var("PINSCAPE_START_DEVICE").ok(),
+    })
 }
 
 /// Host OS: `linux`, `windows`, `macos`.
@@ -220,6 +227,21 @@ pub fn run() {
             files::list_backups,
             files::read_backup,
             files::backup_folder,
+            buttons::buttons_config,
+            buttons::buttons_live,
+            outputs::outputs_config,
+            outputs::outputs_levels,
+            outputs::outputs_set_port,
+            outputs::outputs_set_test_mode,
+            outputs::outputs_set_device_port,
+            outputs::outputs_set_night_mode,
+            outputs::outputs_all_off,
+            ir::ir_poll,
+            ir::ir_send,
+            ir::ir_set_tv_relay,
+            ir::ir_config_status,
+            ir::ir_parse_code,
+            ir::ir_protocols,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
