@@ -441,7 +441,7 @@ mismatched family IDs; config save refuses syntax errors.
 | | Linux (Debian/Ubuntu) | Windows | macOS |
 |---|---|---|---|
 | Rust | rustup (stable ≥ 1.77) | rustup + MSVC Build Tools | rustup + Xcode CLT |
-| Node | `sudo apt install nodejs npm` (Debian 13: Node 20; Ubuntu 24.04: Node 18; Ubuntu 22.04 needs NodeSource/nvm) | Node 20+ | Node 20+ |
+| Node | `sudo apt install nodejs npm` (needs Node 20.19+: Debian 13 OK; Ubuntu 24.04/22.04 need NodeSource/nvm) | Node 20.19+ | Node 20.19+ |
 | System | `libwebkit2gtk-4.1-dev build-essential curl wget file librsvg2-dev pkg-config`, plus the udev rule from `packaging/udev/` | WebView2 (preinstalled on Win 10/11) | — |
 | Tauri CLI | `cargo install tauri-cli --version "^2"` (or `npm run tauri`) | same | same |
 

@@ -202,9 +202,9 @@ tray icon). Installed packages only need the runtime libraries `libwebkit2gtk-4.
 sudo apt install nodejs npm
 ```
 
-Debian 13 ships Node 20 and Ubuntu 24.04 ships Node 18; both work.
-Ubuntu 22.04's Node 12 is too old. On 22.04, install Node 20 from
-[NodeSource](https://github.com/nodesource/distributions) or with
+The UI build needs Node 20.19 or newer. Debian 13 ships Node 20.19, which works.
+Ubuntu 24.04's Node 18 and Ubuntu 22.04's Node 12 are too old; on those, install
+Node 22 from [NodeSource](https://github.com/nodesource/distributions) or with
 [nvm](https://github.com/nvm-sh/nvm) instead.
 
 **3. Rust** via [rustup](https://rustup.rs). The distro `rustc` package may be
@@ -227,7 +227,7 @@ sudo udevadm control --reload && sudo udevadm trigger
 ### Windows
 
 - Rust via [rustup](https://rustup.rs), with the MSVC Build Tools (rustup offers to install them)
-- [Node.js 20+](https://nodejs.org)
+- [Node.js 20.19+](https://nodejs.org)
 - WebView2 is preinstalled on Windows 10/11. No USB driver is needed: the
   device's WinUSB interface installs itself.
 
@@ -235,7 +235,7 @@ sudo udevadm control --reload && sudo udevadm trigger
 
 - Xcode command-line tools: `xcode-select --install`
 - Rust via [rustup](https://rustup.rs)
-- Node.js 20+ (`brew install node`, or from nodejs.org)
+- Node.js 20.19+ (`brew install node`, or from nodejs.org)
 
 ## Linux USB permissions
 
