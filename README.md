@@ -9,6 +9,8 @@ See **[docs/PLAN.md](docs/PLAN.md)** for the full plan, architecture and phases.
 
 > Unofficial project; not affiliated with the upstream Pinscape Pico project.
 
+<img width="1553" height="831" alt="image" src="https://github.com/user-attachments/assets/6c248144-53a6-4120-a77e-aadf1c62a49b" />
+
 ## Status: Phase 3 (live testers) done; Linux tested, Windows/macOS not yet
 
 | Piece | State |
