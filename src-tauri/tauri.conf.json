@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "PinScape-Cross",
+  "productName": "Pinscape-Cross",
   "version": "0.1.0",
   "identifier": "io.github.superhac.pinscape-cross",
   "build": {
@@ -13,7 +13,7 @@
     "windows": [
       {
         "label": "main",
-        "title": "PinScape-Cross",
+        "title": "Pinscape-Cross",
         "width": 1200,
         "height": 800,
         "minWidth": 800,

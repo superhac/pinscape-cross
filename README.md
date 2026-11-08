@@ -1,4 +1,4 @@
-# PinScape-Cross
+# Pinscape-Cross
 
 A cross-platform (Windows · Linux · macOS) configuration tool for
 [Pinscape Pico](https://github.com/mjrgh/PinscapePico) virtual-pinball I/O

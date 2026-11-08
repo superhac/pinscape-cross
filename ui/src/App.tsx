@@ -76,7 +76,7 @@ export default function App() {
     <div className="app">
       <aside className="sidebar">
         <header>
-          <h1>PinScape-Cross</h1>
+          <h1>Pinscape-Cross</h1>
         </header>
         {devices.length === 0 && <p className="muted small">No devices. Plug in a Pinscape Pico; it appears here automatically.</p>}
         <ul>
