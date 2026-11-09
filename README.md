@@ -8,8 +8,12 @@ Goal: feature parity with the Windows-only Pinscape Pico GUI Config Tool.
 See **[docs/PLAN.md](docs/PLAN.md)** for the full plan, architecture and phases.
 
 > Unofficial project; not affiliated with the upstream Pinscape Pico project.
-
+<p align="center">
 <img width="1553" height="831" alt="image" src="https://github.com/user-attachments/assets/6c248144-53a6-4120-a77e-aadf1c62a49b" />
+<img width="1200" height="828" alt="image" src="https://github.com/user-attachments/assets/a530ef01-e484-4502-944c-8cb78a003c70" />
+<img width="879" height="1024" alt="image" src="https://github.com/user-attachments/assets/39c49150-83a6-4096-83d2-711ea26aeee7" />
+<img width="1000" height="1024" alt="image" src="https://github.com/user-attachments/assets/1c5a67a4-f713-4e21-ab72-23d855fe2ed9" />
+</p>
 
 ## Installing
 
