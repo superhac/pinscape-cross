@@ -458,5 +458,6 @@ Still open:
 1. ~~App name~~ Decided: **Pinscape-Cross** (2026-11-08). Must not imply it's the official tool
    unless upstream adopts it.
 2. Upstream relationship: contribute back (schema JSON output, Rust crates) or stay separate?
-3. Keep the help as upstream HTML, or convert to Markdown for easier theming?
+3. ~~Keep the help as upstream HTML, or convert to Markdown?~~ Decided: keep the upstream HTML;
+   the app adds a dark stylesheet to each page in dark mode (ui/src/shell/helpTheme.ts, 2026-11-09).
 4. Minimum OS versions (proposal: Win 10 1809+, Ubuntu 22.04+/Debian 12+, macOS 12+).

@@ -9,6 +9,11 @@ app shows them in its update notice, so write entries for end users.
 
 ## [Unreleased]
 
+### Changed
+
+- The help pages (Help tab and the editor's reference pane) follow the dark theme, and switch
+  along with it while open.
+
 ### Fixed
 
 - A config whose lines end partly in CRLF and partly in LF (for example after editing it in
@@ -18,6 +23,10 @@ app shows them in its update notice, so write entries for end users.
   now scrolls the error line into view; it used to end up hidden under the editor's sticky
   header at the top.
 - Screen readers now announce each form field by its property name instead of just "edit text".
+- At Large text size the form view no longer cuts a long property's type down to "nu…"; the
+  type wraps under the name instead.
+- An empty editor (for example a Pico with no Safe Mode config yet) no longer lists an
+  "Unexpected end of file" error in the Problems list.
 
 ## [0.6.0] - 2026-11-09
 

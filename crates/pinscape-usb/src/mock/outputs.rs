@@ -477,15 +477,19 @@ mod tests {
         assert_eq!(e.status(), Some(Status::BadParams));
         assert!(c.set_device_port(dt::TLC5940, 0, 32, 1).is_err());
 
-        // keepalive extends the deadline
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        // keepalive extends the deadline. Checked on the deadline itself rather
+        // than with real sleeps: slow CI runners (macOS) oversleep enough to
+        // break any short margin.
+        let first = h.lock().unwrap().outputs.test_deadline.expect("deadline set");
+        std::thread::sleep(std::time::Duration::from_millis(20));
         c.set_output_test_mode(true, 300).unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(200));
-        assert!(c.query_logical_port_levels().unwrap().test_mode, "keepalive extended test mode");
+        let renewed = h.lock().unwrap().outputs.test_deadline.expect("deadline set");
+        assert!(renewed > first, "keepalive extended test mode");
+        assert!(c.query_logical_port_levels().unwrap().test_mode);
         assert_eq!(c.query_device_port_levels().unwrap()[tlc.first_port + 5], 1000, "re-enable keeps levels");
 
-        // ...and without one it expires
-        std::thread::sleep(std::time::Duration::from_millis(400));
+        // ...and without one it expires: move the deadline into the past
+        h.lock().unwrap().outputs.test_deadline = Some(std::time::Instant::now() - std::time::Duration::from_millis(1));
         let l = c.query_logical_port_levels().unwrap();
         assert!(!l.test_mode, "test mode timed out");
         let dl = c.query_device_port_levels().unwrap();

@@ -48,9 +48,8 @@ The vendor interface is **exclusive**: close the app before using the CLI
 
 ## Testing checklist
 
-What has been checked on real hardware so far, and what still needs testing. Tick items
-off (`- [x]`) as they're verified. Everything listed is covered by automated tests against
-the simulated device (`cargo test`), unless marked otherwise.
+What has been checked on real hardware. Everything is also covered by automated tests
+against the simulated device (`cargo test`), unless marked otherwise.
 
 ### Verified on hardware (Linux, Debian 13, RP2040 Pico, firmware v1.0.2)
 
@@ -111,114 +110,6 @@ the simulated device (`cargo test`), unless marked otherwise.
       and Problems-list clicks; empty-editor message; **help** links and F1 in nested fields open the
       reference at the right property; Dark theme, Small and Large text; Ctrl+S in the form saves with
       the confirmation, reboot and backup
-
-### Still to test
-
-**Config & device management**
-- [ ] Overview **Factory Mode**: firmware v1.0.2 and v1.0.3 ignore the request (upstream `VendorIfc.cpp`
-      still has no case for `SUBCMD_RESET_FACTORY` as of upstream 43e314a, so the upstream Windows tool is
-      affected too); retest when fixed upstream
-- [ ] Two or more Picos connected at once (selection, `--id` in the CLI) *(needs a second Pico)*
-- [ ] **All devices** dashboard with two real Picos: both cards update at once, and each card's
-      **Overview** / **Reboot…** acts on its own Pico (single-Pico behaviour verified)
-- [ ] Dashboard warnings on real hardware: give two Picos the same `id.unitNum` (duplicate
-      unit), run different firmware versions on them (mismatch); switching from the Outputs
-      tab in test mode to the dashboard ends test mode, so no test-mode warning remains;
-      one Pico in BOOTSEL and one "in use" (CLI open) both get cards
-- [ ] **Print…** on the Config tab on Windows and macOS (Linux done): line-numbered listing with header; app looks normal afterwards
-
-**Config form view**
-- [ ] Pro template in the form (DIY checked); long lists (76 outputs with **expand all**) scroll smoothly, judged by eye
-
-**Outputs** (needs an output wired, e.g. an LED + resistor on GP3)
-- [ ] Set a logical port level from the slider and 0/255 buttons
-- [ ] Night Mode toggle (noisy ports silenced)
-- [ ] Test mode: enter (confirmation), physical port sliders, leaving the tab exits test mode,
-      device returns to normal within 3 s if the app is closed
-- [ ] **All off**
-- [ ] Other output chips: TLC5940, TLC59116, TLC5947, PCA9685, PCA9555, 74HC595, PWMWorker
-- [ ] PWMWorker **Reset** / **Boot loader** buttons
-
-**DOF tab**
-- [ ] Table matches the `outputs` array for a config with many ports and several chip types (one GPIO port checked)
-- [ ] Unit number shown matches `id.unitNum`; with a second Pico on the same unit number the conflict error appears (and clears after renumbering + reboot)
-- [ ] `feedbackController: { enable: false }` shows the "DOF can't see this Pico" error
-- [ ] **Copy port list** / **Copy CSV** paste correctly; **Save CSV…** opens in a spreadsheet (names with commas/quotes intact); **Save port list…** writes a `.txt`
-- [ ] On Windows with a current DOF install: assign ports in the DOF Config Tool (Cabinet › Devices › Port Assignments) from the exported list, install the generated config, and check that DOF fires the expected outputs (e.g. flipper, shaker) in a table
-- [ ] Check the guidance text against the DOF Config Tool's actual menu and device names
-
-**Buttons** (needs wiring)
-- [ ] Real key / gamepad / XInput actions on the PC
-- [ ] Shift buttons and the shift-state display
-- [ ] PCA9555 and 74HC165 input grids
-- [ ] Button event log with `enableLogging: true` on a GPIO button: timestamps, hold times, Clear, CSV export
-
-**IR & TV-ON** (needs an IR receiver on `irRx` and an IR LED on `irTx`)
-- [ ] Receive codes from a remote; raw pulse timeline
-- [ ] Send a code, and re-send a received one
-- [ ] TV-ON power-sense cycle and relay On / Off / Pulse
-- [ ] IR raw pulse **Export CSV…**
-
-**Nudge** (needs an accelerometer: LIS3DH, MMA8451Q, MXC6655XA, MC3416 or LIS3DSH)
-- [ ] Live views and charts; "no accelerometer" detection
-- [ ] Center now; 15 s calibration (with and without "save when done")
-- [ ] Parameters: Apply, Save to device, Revert
-- [ ] Check the suspected firmware issue: velocity decay seems inverted vs. its documentation
-- [ ] **Record CSV** file opens in a spreadsheet
-
-**Plunger** (needs a sensor; a potentiometer on a Pico ADC pin is the simplest)
-- [ ] Live gauge, Z axis, firing state, chart
-- [ ] Calibration, Undo calibration, Save / Revert / Restore defaults
-- [ ] Settings: jitter filter, firing time limit, orientation, scaling factor
-- [ ] Image sensors (TCD1103 / TSL1410R / TSL1412S) pixel view and integration time
-- [ ] Quadrature (AEDR8300) and proximity (VCNL4010 / VL6180X) sensors
-- [ ] Confirm calibration values are native sensor units (the header says 0–65535)
-- [ ] Plunger **Record CSV**
-
-**Pinout tab** (any Pinscape Pico; no extra wiring needed)
-- [ ] Pico 2 (RP2350): diagram shown with "RP2350" on the chip; Pico W / Pico 2 W build (if available) shows the wireless-chip pins under "Not on the header"
-- [ ] A non-standard board (e.g. an RP2350B board, or another build target) shows the "isn't a standard Pico layout" note and the GPIO list instead of a diagram
-- [ ] Hover, focus (Tab, arrow keys) and click show the full assignment; a screen reader reads each pin's description
-- [ ] Legend click highlights one category; light and dark themes and Small / Large text size look right
-- [ ] Change the config (e.g. add a button on a free GPIO), save with reboot: the tab updates by itself within a few seconds
-
-**Firmware**
-- [ ] Install by drag-and-drop (file dialog done) (progress window,
-      reconnect, new version shown)
-- [ ] Pico 2 (RP2350): PICOBOOT reboot, family check
-- [ ] Mass-storage fallback (copy to the RPI-RP2 drive). Needs the drive mounted: desktops without an automounter (e.g. Hyprland) get the "no mounted boot drive" message
-- [ ] Dropping a `.uf2` on any tab (not just Firmware) opens the install dialog; with two Picos the target picker works
-- [ ] **Erase Pinscape config…** / **Erase entire flash…** buttons in the app (done with the CLI on RP2040), and on an RP2350
-- [ ] **Erase entire flash** starting from a Pico already in boot loader mode
-- [ ] Erase on a clone with 4 / 8 / 16 MB flash
-
-**Preferences, shortcuts & shell**
-- [ ] Preferences persist across restarts (`preferences.json` in the app config folder)
-- [ ] Theme Light / Dark / System: app, editor, log colors and window title bar follow; switching the OS theme while on System
-- [ ] Text size Small / Large; editor font size, tab size, insert spaces, minimap, word wrap apply live
-- [ ] Emacs keys (Linux/Windows, and real Control on macOS), incl. repeated Ctrl+K then Ctrl+Y; normal Ctrl+A / Ctrl+F when off
-- [ ] "Confirm before saving" off: a clean save goes straight through; a save with warnings still asks
-- [ ] Backups off: no backup written and the message says so; retention removes old backups on the next save
-- [ ] Last tab and device restored at startup
-- [ ] About: version, upstream revision, links open in the browser; **Check for updates** message
-- [ ] Help tab / reference pane: https and mjrnet.org links open in the browser; links between help pages stay in the frame
-- [ ] All shortcuts (list in Help › Keyboard shortcuts), incl. F1 with and without editor focus, Ctrl+Shift+R confirmation, Cmd on macOS
-- [ ] Tab bar arrow / Home / End keys; keyboard focus outlines; Esc closes the topmost dialog first
-
-**Releases & auto-update** (need a tagged release; see [docs/RELEASING.md](docs/RELEASING.md))
-- [ ] Tag push creates one draft release; all four build jobs (Linux, Windows, macOS arm64 and x64) upload into it
-- [ ] Draft contains the files (the manual dry run's artifacts had them all)
-- [ ] macOS ad-hoc signing works for both architectures
-- [ ] With the updater key and pubkey set: `.sig` files and `latest.json` (all platforms, `/download/vX.Y.Z/` URLs); with only one of them set the build fails
-- [ ] End to end: install 0.x.0, publish 0.x.1, the notice appears, Install and restart works (AppImage, NSIS, MSI, macOS); `.deb`/`.rpm` show **Download…**
-- [ ] Optional code signing with real certificates (Apple Developer ID + notarization, Windows `.pfx`)
-
-**Platforms & packaging**
-- [ ] Windows: device access via WinUSB, NSIS `.exe` and `.msi` installers, RP2040 firmware
-      update via the mass-storage fallback
-- [ ] macOS: device access, `.dmg`, Gatekeeper warning for the unsigned app
-- [ ] Installing the `.deb` (udev rule active right after install), `.rpm` on Fedora, AppImage
-- [ ] Other distros: Ubuntu 22.04 / 24.04, Fedora; X11 as well as Wayland (file drag-and-drop)
 
 ## Layout
 

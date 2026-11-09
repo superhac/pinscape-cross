@@ -2,6 +2,7 @@
 // allowed URLs are limited in src-tauri/capabilities/default.json: any https
 // URL, plus http on mjrnet.org (the upstream help pages link there).
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { themeHelpPage } from "./helpTheme";
 
 export const REPO_URL = "https://github.com/superhac/pinscape-cross";
 export const UPSTREAM_URL = "https://github.com/mjrgh/PinscapePico";
@@ -34,8 +35,9 @@ export function externalClick(e: React.MouseEvent<HTMLAnchorElement>) {
 
 /**
  * `onLoad` handler for same-origin help iframes: clicks on links that leave
- * the app open in the system browser instead of navigating the frame, and
- * shortcut keys pressed inside the frame reach the app's key handler.
+ * the app open in the system browser instead of navigating the frame,
+ * shortcut keys pressed inside the frame reach the app's key handler, and the
+ * page follows the app's dark theme.
  */
 export function hookIframe(e: React.SyntheticEvent<HTMLIFrameElement>) {
   const frame = e.currentTarget;
@@ -46,6 +48,7 @@ export function hookIframe(e: React.SyntheticEvent<HTMLIFrameElement>) {
     return; // cross-origin: nothing we can do
   }
   if (!doc) return;
+  themeHelpPage(doc);
   const own = frame.contentWindow?.location.origin;
 
   const onClick = (ev: MouseEvent) => {

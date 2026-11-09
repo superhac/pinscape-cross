@@ -109,7 +109,9 @@ const ConfigEditor = forwardRef<ConfigEditorHandle, Props>(function ConfigEditor
       vTimer = setTimeout(async () => {
         const seq = ++vSeq;
         const text = model.getValue();
-        const diags = await api.configValidate(text).catch(() => [] as Diagnostic[]);
+        // An empty editor (e.g. no Safe Mode config on the device yet) isn't an
+        // error to report: saving it is refused anyway, with its own message.
+        const diags = text.trim() === "" ? [] : await api.configValidate(text).catch(() => [] as Diagnostic[]);
         if (seq !== vSeq || model.isDisposed()) return;
         monaco.editor.setModelMarkers(
           model,
