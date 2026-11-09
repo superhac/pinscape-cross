@@ -1,0 +1,135 @@
+/* Pico pinout / GPIO-assignment view (PinoutTab.tsx) */
+.pinout {
+  display: flex; flex-direction: column; gap: 12px;
+  /* usage-category colours (pads, chip edges, legend swatches) */
+  --cat-button: #2563eb; --cat-output: #ea580c; --cat-i2c: #0891b2; --cat-spi: #db2777;
+  --cat-uart: #7c3aed; --cat-ir: #dc2626; --cat-plunger: #16a34a; --cat-accel: #ca8a04;
+  --cat-system: #64748b; --cat-other: #92400e; --cat-free: transparent;
+  --pcb: #1f6f43; --pcb-edge: #175a36; --pad-ring: #c9a23a;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .pinout {
+    --cat-button: #60a5fa; --cat-output: #fb923c; --cat-i2c: #22d3ee; --cat-spi: #f472b6;
+    --cat-uart: #a78bfa; --cat-ir: #f87171; --cat-plunger: #4ade80; --cat-accel: #facc15;
+    --cat-system: #94a3b8; --cat-other: #d6a46a;
+    --pcb: #1a5b38; --pcb-edge: #134a2d; --pad-ring: #b8923a;
+  }
+}
+:root[data-theme="dark"] .pinout {
+  --cat-button: #60a5fa; --cat-output: #fb923c; --cat-i2c: #22d3ee; --cat-spi: #f472b6;
+  --cat-uart: #a78bfa; --cat-ir: #f87171; --cat-plunger: #4ade80; --cat-accel: #facc15;
+  --cat-system: #94a3b8; --cat-other: #d6a46a;
+  --pcb: #1a5b38; --pcb-edge: #134a2d; --pad-ring: #b8923a;
+}
+.pinout .cat-button { --cat: var(--cat-button); }
+.pinout .cat-output { --cat: var(--cat-output); }
+.pinout .cat-i2c { --cat: var(--cat-i2c); }
+.pinout .cat-spi { --cat: var(--cat-spi); }
+.pinout .cat-uart { --cat: var(--cat-uart); }
+.pinout .cat-ir { --cat: var(--cat-ir); }
+.pinout .cat-plunger { --cat: var(--cat-plunger); }
+.pinout .cat-accel { --cat: var(--cat-accel); }
+.pinout .cat-system { --cat: var(--cat-system); }
+.pinout .cat-other { --cat: var(--cat-other); }
+.pinout .cat-free { --cat: var(--cat-free); }
+
+.pinout-note {
+  margin: 0; border: 1px solid color-mix(in srgb, var(--warn) 45%, var(--border)); border-radius: 8px;
+  background: color-mix(in srgb, var(--warn) 10%, var(--panel)); padding: 8px 12px; line-height: 1.45;
+}
+.pinout-main { display: flex; flex-wrap: wrap; gap: 16px; align-items: flex-start; }
+.pinout-side { flex: 1 1 260px; max-width: 420px; display: flex; flex-direction: column; gap: 12px; }
+.pinout-side .card h3 { margin-bottom: 6px; }
+.pinout-details table.kv td { font-family: inherit; }
+
+/* board diagram: a CSS grid, one row per header pin pair */
+.pico-figure { margin: 0; flex: 0 1 auto; display: flex; flex-direction: column; gap: 6px; min-width: 0; overflow-x: auto; }
+.pico-board {
+  display: grid; position: relative; align-items: center;
+  grid-template-columns: minmax(7em, 15em) max-content 2.4em 7em 2.4em max-content minmax(7em, 15em);
+  justify-content: start;
+  grid-template-rows: 2.2em repeat(20, 1.9em) 1em;
+  column-gap: 4px;
+}
+.pcb {
+  position: relative; z-index: 0; align-self: stretch; height: 100%;
+  background: var(--pcb); border: 1px solid var(--pcb-edge); border-radius: 10px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+}
+.pcb .usb {
+  position: absolute; top: -10px; left: 50%; transform: translateX(-50%);
+  width: 3.4em; height: 1.6em; border-radius: 3px; background: linear-gradient(#d4d7dc, #9ca3af); border: 1px solid #6b7280;
+}
+.pcb .cpu {
+  width: 4.6em; height: 4.6em; display: grid; place-items: center; border-radius: 4px;
+  background: #23262b; color: #d1d5db; font: 600 0.786rem var(--mono); box-shadow: 0 0 0 1px #000;
+}
+
+.pin-pad {
+  z-index: 1; justify-self: center; width: 1.45rem; height: 1.45rem; border-radius: 50%;
+  display: grid; place-items: center; font: 600 0.643rem var(--mono); color: #fff; text-shadow: 0 0 2px #000, 0 0 2px #000;
+  background: var(--cat, #2a2a2a); border: 2px solid var(--pad-ring); cursor: default; user-select: none;
+}
+.pin-pad.square { border-radius: 3px; }
+.pin-pad.kind-ground { background: #2a2a2a; }
+.pin-pad.kind-power { background: #8b1d1d; }
+.pin-pad.kind-control { background: #3f3f46; }
+.pin-pad.cat-free { background: var(--pcb-edge); }
+.pin-pad.cat-free, .pin-name.cat-free { cursor: pointer; }
+.pin-pad[class*="cat-"], .pin-name[class*="cat-"] { cursor: pointer; }
+
+.pin-name { font: 0.857rem var(--mono); white-space: nowrap; display: flex; align-items: baseline; gap: 4px; padding: 0 2px; }
+.pin-name.l { justify-self: end; flex-direction: row-reverse; }
+.pin-name.r { justify-self: start; }
+.pin-name.kind-ground { color: var(--muted); }
+.pin-name.kind-power { color: var(--danger); font-weight: 600; }
+.pin-name.kind-control { color: var(--warn); font-weight: 600; }
+.adc-tag {
+  font-size: 0.714rem; padding: 0 4px; border-radius: 4px; color: var(--cat-plunger);
+  border: 1px solid color-mix(in srgb, var(--cat-plunger) 60%, transparent);
+}
+
+/* assignment chip: the pin's focusable handle */
+.pin-chip {
+  display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%;
+  padding: 1px 8px; border-radius: 5px; font-size: 0.857rem; text-align: left; line-height: 1.5;
+  background: color-mix(in srgb, var(--cat) 20%, var(--panel));
+  border: 1px solid color-mix(in srgb, var(--cat) 55%, var(--border));
+}
+.pin-chip.l { justify-self: end; border-right: 4px solid var(--cat); }
+.pin-chip.r { justify-self: start; border-left: 4px solid var(--cat); }
+.pin-chip .pin-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pin-chip .pin-gp { font-family: var(--mono); font-weight: 600; flex: none; }
+.pin-chip.cat-free { background: none; border: 1px dashed var(--border); color: var(--muted); }
+.pin-chip.cat-free.l { border-right-style: dashed; }
+.pin-chip.cat-free.r { border-left-style: dashed; }
+.pin-chip.active, .pin-chip[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.pin-chip:hover:not(:disabled) { border-color: var(--accent); }
+.pin-chip.warn { border-color: var(--warn); }
+.pin-warn {
+  flex: none; display: inline-grid; place-items: center; width: 1.2em; height: 1.2em; border-radius: 50%;
+  background: var(--warn); color: #000; font-weight: 700; font-size: 0.75rem;
+}
+.pin-pad.active { box-shadow: 0 0 0 2px var(--accent); }
+.pin-name.active { color: var(--accent); font-weight: 600; }
+.pinout .dim { opacity: 0.3; }
+
+/* fallback list for non-standard boards, and the not-on-header list */
+.pinout-grid {
+  flex: 1 1 520px; display: grid; gap: 6px; grid-template-columns: repeat(auto-fill, minmax(15em, 1fr)); align-content: start;
+}
+.pinout-grid .pin-chip, .pinout-internal .pin-chip { border-left: 4px solid var(--cat); padding: 4px 8px; }
+.pinout-grid .pin-chip.cat-free, .pinout-internal .pin-chip.cat-free { border-left: 1px dashed var(--border); }
+.pinout-internal { display: flex; flex-direction: column; gap: 4px; align-items: stretch; }
+
+.pinout-legend { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fill, minmax(11em, 1fr)); gap: 4px; }
+.legend-item { width: 100%; display: flex; align-items: center; gap: 6px; padding: 2px 6px; border-color: transparent; background: none; text-align: left; }
+.legend-item .muted { margin-left: auto; }
+.legend-item[aria-pressed="true"] { border-color: var(--accent); background: var(--bg); }
+.swatch { width: 0.9em; height: 0.9em; border-radius: 3px; background: var(--cat); border: 1px solid color-mix(in srgb, var(--cat) 70%, var(--text)); flex: none; }
+.legend-item.cat-free .swatch { border: 1px dashed var(--muted); }
+
+.pinout-free { margin: 0; display: flex; flex-wrap: wrap; gap: 4px; }
+.pinout-tag { font: 0.857rem var(--mono); padding: 1px 6px; border-radius: 4px; border: 1px dashed var(--border); }
+.pinout-warnings ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; line-height: 1.4; }
+.pinout-warnings { border-color: color-mix(in srgb, var(--warn) 50%, var(--border)); }

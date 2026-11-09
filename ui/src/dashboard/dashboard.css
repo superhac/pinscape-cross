@@ -1,0 +1,42 @@
+/* Multi-device dashboard (Dashboard.tsx) */
+.dash { display: flex; flex-direction: column; gap: 12px; }
+.dash-head { display: flex; align-items: baseline; gap: 12px; flex-wrap: wrap; }
+.dash-head h2 { font-size: 1.143rem; }
+
+.dash-problems ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.dash-problems p { margin: 0; }
+.dash-problems li { display: flex; gap: 8px; align-items: baseline; }
+.sev-icon { flex-shrink: 0; width: 1.1em; text-align: center; }
+.sev-error .sev-icon { color: var(--danger); }
+.sev-warning .sev-icon { color: var(--warn); }
+.sev-info .sev-icon { color: var(--muted); }
+
+.dash-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+.dash-card { display: flex; flex-direction: column; gap: 8px; border-left-width: 4px; }
+.dash-card p { margin: 0; }
+.dash-card.clickable { cursor: pointer; }
+.dash-card.clickable:hover { border-color: var(--accent); }
+.dash-card.sev-error-card { border-left-color: var(--danger); }
+.dash-card.sev-warning-card { border-left-color: var(--warn); }
+.dash-title { display: flex; align-items: center; gap: 8px; }
+.dash-title > :first-child { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.link-btn {
+  border: none; background: none; padding: 0; font-weight: 600; font-size: 1.071rem; text-align: left; color: var(--text);
+}
+.link-btn:hover:not(:disabled) { color: var(--accent); }
+.dash-tags { display: flex; flex-wrap: wrap; gap: 4px; }
+.dash-tags .badge.bad { background: color-mix(in srgb, var(--danger) 16%, transparent); color: var(--danger); }
+.dash-actions { display: flex; gap: 8px; cursor: default; }
+.warn-text { color: var(--warn); font-weight: 600; }
+
+.pill { font-size: 0.786rem; padding: 1px 8px; border-radius: 999px; white-space: nowrap; border: 1px solid currentColor; }
+.pill.ok { color: var(--ok); }
+.pill.bad { color: var(--danger); }
+.pill.boot { color: var(--accent); }
+
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap;
+}
+
+/* Sidebar entry ("All devices", App.tsx) */
+.sidebar li.dash-entry { flex-direction: row; align-items: center; border-bottom: 1px solid var(--border); }

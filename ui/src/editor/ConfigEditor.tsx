@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
-import { api, Breadcrumb, Diagnostic, Preferences } from "../api";
+import { api, Breadcrumb, Diagnostic, EditorRange, Preferences } from "../api";
 import { currentTheme, LANG, monaco, registerLanguage, toRange } from "./monaco";
 import { installEmacsKeys } from "./emacs";
 import { getPrefs, subscribePrefs } from "../prefs/store";
@@ -14,10 +14,17 @@ function prefOptions(p: Preferences["editor"]): monaco.editor.IEditorOptions {
   };
 }
 
+/** TextModel's undo/redo (not in Monaco's public typings). */
+type UndoModel = monaco.editor.ITextModel & { undo(): void; redo(): void };
+
 export interface ConfigEditorHandle {
   /** Move the cursor to a range and focus the editor. */
-  reveal: (d: Diagnostic) => void;
+  reveal: (d: { range: EditorRange }) => void;
   focus: () => void;
+  /** Apply form edits as one undoable step; false if the text isn't `base` any more. */
+  applyEdits: (base: string, edits: { range: EditorRange; text: string }[]) => boolean;
+  undo: () => void;
+  redo: () => void;
 }
 
 interface Props {
@@ -51,6 +58,19 @@ const ConfigEditor = forwardRef<ConfigEditorHandle, Props>(function ConfigEditor
       e.focus();
     },
     focus: () => editor.current?.focus(),
+    applyEdits(base, edits) {
+      const e = editor.current;
+      const model = e?.getModel();
+      if (!e || !model || model.getValue() !== base) return false;
+      e.pushUndoStop();
+      model.pushEditOperations([], edits.map((x) => ({ range: toRange(x.range), text: x.text })), () => null);
+      e.pushUndoStop();
+      return true;
+    },
+    // Straight to the model: the editor's undo command would act on the
+    // focused form input instead while the form view is showing.
+    undo: () => (editor.current?.getModel() as UndoModel | null)?.undo(),
+    redo: () => (editor.current?.getModel() as UndoModel | null)?.redo(),
   }));
 
   useEffect(() => {

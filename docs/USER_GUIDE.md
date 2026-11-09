@@ -117,11 +117,61 @@ are not affected.
 | **Nudge** | Accelerometer readings and charts, centering, calibration, and the nudge parameters (apply to try, save to keep, revert). Includes a ball-physics tester. |
 | **Plunger** | Live plunger position and firing state, chart, image-sensor pixels, calibration (with undo) and sensor settings. |
 | **IR** | Received IR remote codes in the config's text format (ready to copy), a raw pulse view, sending codes, and the TV-ON power sense and relay. |
+| **Pinout** | A picture of the Pico's 40-pin header showing what each GPIO is used for; see [Pinout view](#pinout-view). |
+| **DOF** | The output ports as DOF numbers them, with checks for common setup problems and exports for the DOF Config Tool; see [Setting up DOF](#setting-up-dof). |
 | **Firmware** | Install a new firmware version; see below. |
 | **Help** | The upstream Pinscape Pico help pages. |
 
 Tabs for features your configuration doesn't use (no accelerometer, no plunger, no IR
 receiver) say so instead of showing readings.
+
+### Pinout view
+
+The **Pinout** tab draws the board as seen from above, USB connector at the top, with the
+physical pin numbers on the pads and the GP numbers, ground, power (VBUS, VSYS, 3V3,
+ADC_VREF) and control pins (RUN, 3V3_EN) beside them. ADC-capable pins are marked ADC0–ADC2.
+Next to each GPIO is what the running configuration uses it for (the same names the
+firmware reports on the Overview tab, e.g. "Button #3" or "I2C0 SDA"), coloured by kind:
+button input, output/PWM, I²C, SPI, UART, IR, plunger/ADC, accelerometer, board/internal,
+other, or free.
+
+- Hover over, focus or click a pin to see its full assignment in **Pin details**; clicking
+  keeps it shown. Tab moves through the pins, and the arrow keys move around the diagram.
+- Click a **Legend** entry to highlight only those pins (click again to show all).
+- **Free GPIOs** lists the header pins nothing is assigned to, handy when wiring something new.
+- **Not on the header** shows GP23, GP24, GP25 and GP29, which the board itself uses
+  (power-save control, VBUS sense, LED, VSYS measurement; on a Pico W / Pico 2 W the wireless
+  chip). If your configuration assigns one of them to something else, **Check these** warns.
+
+The diagram is shown for the Raspberry Pi Pico, Pico W, Pico 2 and Pico 2 W (the firmware's
+build target tells the app which board it is). For other boards, such as RP2350B boards
+with more GPIOs or third-party layouts, the tab lists every GPIO by number instead of
+drawing a header that might not match. The view reads the assignments from the device, so
+after changing the config, save it with "reboot after saving" (or reboot) and the tab updates
+within a few seconds.
+## All devices (dashboard)
+
+Cabinets often use two or more Picos, for example one for buttons and the plunger and
+one for outputs. **All devices** at the top of the sidebar shows them side by side: one
+card per Pico with its unit number and name, hardware ID, firmware version, uptime, main
+loop time, whether a configuration is stored, the output state (test mode, Night Mode)
+and its active USB interfaces. Picos that can't be opened ("in use", no permission) and
+Picos in boot loader mode get a card too. Click a card, or its **Overview** button, to
+switch to that device; **Reboot…** asks first, as on the Overview tab.
+
+Above the cards, the dashboard lists problems it finds across the devices:
+
+- **Duplicate unit numbers.** DOF and other programs tell Pinscape units apart by
+  `id.unitNum`, so each Pico needs its own.
+- **Overlapping LedWiz unit numbers** (when LedWiz emulation is on), and two devices
+  reporting the same XInput player number.
+- **Different firmware versions** on different Picos; the older ones are tagged.
+- **Output test mode** left on, a Pico with **no configuration** stored, and a Pico that
+  reports the default identity (unit 1, "Pinscape") although a configuration is stored.
+  The firmware doesn't tell the app when it runs in Safe Mode or Factory Mode, so that
+  last one is a hint to check the device's Log tab.
+
+The dashboard refreshes every 3 seconds while it's shown, and stops when you leave it.
 
 ## Editing the configuration
 
@@ -144,6 +194,34 @@ you open them.
 - The app asks before closing, or replacing the text, while you have unsaved changes.
   Edits survive switching tabs.
 
+### Form view
+
+The **Text | Form** switch in the toolbar shows the configuration as a form instead of
+text. It's handy for the common sections: **buttons**, **outputs** and **id** are listed
+first, followed by the other sections (dimmed if they aren't in the file yet).
+
+- Each property has a control that fits its type: a drop-down for fixed choices (such as
+  a button's `type` or a source's `type`), a check box for true/false, a text box for
+  numbers and text. The short description from the reference is shown under it, and
+  **help** opens the full reference at that property. Fields marked `*` are required.
+- Properties that aren't set yet are folded away under "more properties"; give one a value
+  to add it. **✕** removes a property. A property shown in orange isn't valid there (for
+  example, left over after changing a source's `type`); fix or remove it.
+- Lists (buttons, outputs) show one line per entry; click it to open the entry.
+  **+ Add entry** appends a new one (a new button starts as a push button on a GPIO pin
+  sending a key, so you only fill in the pin and key), **Duplicate** inserts a copy, and
+  **Remove** deletes it, together with the comment lines directly above it (usually its
+  label, such as `// Output #3`). Outputs are numbered from 1, like DOF ports.
+- The text is still what gets saved. Every form change is a small edit to the text, so
+  your comments, blank lines and layout are kept, new entries follow the file's existing
+  indentation and style, and you can switch between the views at any time. **Undo** /
+  **Redo** (Ctrl+Z / Ctrl+Y outside a text box) step through form and text edits alike.
+- The form only works on a file without syntax errors. If there are any, it says so and
+  takes you to the first one in the text view.
+- **Save to device**, the warning check and backups work exactly as in the text view.
+- Anything the form doesn't cover (comments, lists of numbers and unusual values) can
+  still be typed in the text view; the form shows such values as text you can edit.
+
 ### Backups
 
 Every time you save a configuration to a Pico, the app first keeps a copy on your
@@ -163,6 +241,31 @@ For a configuration you want to keep longer, use **Export…**.
 If the Pico crashes repeatedly after a change, the firmware starts in **Safe Mode** with
 the Safe-Mode configuration. Open the **Config** tab, fix or restore the configuration from
 **Backups…**, save it, and reboot normally from the Overview tab.
+
+## Setting up DOF
+
+DOF (DirectOutput Framework) drives your cabinet's feedback devices during games. It
+recognizes Pinscape Picos by itself (unified DOF R3++ releases since late 2024); you assign
+what each output does in the online DOF Config Tool (configtool.vpuniverse.com). The
+**DOF** tab gives you what you need for that:
+
+- **Unit number**: DOF tells Picos apart by `id.unitNum` in the config (default 1). Number
+  your Picos 1, 2, 3…; KL25Z Pinscape units are numbered separately.
+- **Port mapping**: DOF port numbers are the order of the entries in the config's `outputs`
+  array (the first entry is port #1). The table shows each port's name, type, the chip and
+  pin it drives, and its flags (noisy/Night Mode, gamma, inverted, Flipper Logic, computed).
+- **Checks**: no outputs configured, Feedback Controller interface disabled (DOF can't see
+  the Pico), two connected Picos with the same unit number or numbers not starting at 1,
+  ports beyond #255 (DOF can't address them), two ports driving the same pin, duplicate or
+  missing names, and notes on computed, share-group and ZB Launch ports.
+- **Exports**: **Copy port list** / **Save port list…** (plain text), **Copy CSV** /
+  **Save CSV…** (a spreadsheet of the table).
+
+In the DOF Config Tool, open **Cabinet › Devices › Port Assignments**, choose the
+Pinscape Pico with your unit number, and assign each port number from the list to its DOF
+device. For share groups, assign the share-group ports, not the physical pool ports behind
+them. Adding or removing an `outputs` entry renumbers the ports after it, so update your
+DOF settings afterwards.
 
 ## Firmware updates
 

@@ -5,11 +5,15 @@
 //! * [`schema`]: schema generated from upstream `JSONConfigRef.txt`, and the
 //!   Windows Config Tool's rules check.
 //! * [`context`]: cursor context for completion, hover and breadcrumbs.
+//! * [`form`] and [`edit`]: the form view's model and the minimal text edits
+//!   it makes (comments and formatting are kept).
 //!
 //! Editor-facing functions take and return positions as Monaco does:
 //! 1-based line numbers and 1-based columns counted in UTF-16 code units.
 
 pub mod context;
+pub mod edit;
+pub mod form;
 pub mod parser;
 pub mod schema;
 

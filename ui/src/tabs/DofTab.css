@@ -1,0 +1,34 @@
+/* DOF config helper (DofTab.tsx) */
+.doftab { display: flex; flex-direction: column; gap: 12px; }
+.doftab .mono { font-family: var(--mono); }
+.doftab .ok-text { color: var(--ok); }
+
+.dof-ident { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; margin: 0; }
+.dof-ident dt { color: var(--muted); }
+.dof-ident dd { margin: 0; overflow-wrap: anywhere; }
+.dof-unit { font-size: 1.3rem; }
+
+.dof-guide { margin: 0; padding-left: 20px; line-height: 1.5; }
+.dof-guide li + li { margin-top: 4px; }
+
+.dof-counts { text-transform: none; letter-spacing: 0; }
+.dof-problems { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.dof-problems li { display: flex; gap: 10px; align-items: baseline; line-height: 1.45; }
+.dof-sev {
+  flex: none; min-width: 64px; text-align: center; font-size: 11px; font-weight: 600; padding: 1px 6px;
+  border-radius: 999px; border: 1px solid var(--border); color: var(--muted);
+}
+.dof-sev.sev-error { color: var(--danger); border-color: var(--danger); }
+.dof-sev.sev-warning { color: var(--warn); border-color: var(--warn); }
+
+.dof-table { max-height: 520px; overflow: auto; }
+.dof-table thead th { position: sticky; top: 0; background: var(--panel); }
+.dof-table td.sans { font-family: inherit; }
+.dof-table tr.row-error td { background: color-mix(in srgb, var(--danger) 10%, transparent); }
+.dof-table tr.row-warning td { background: color-mix(in srgb, var(--warn) 10%, transparent); }
+.dof-flags { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.dof-flag {
+  font-size: 11px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border);
+  background: var(--panel-2); color: var(--muted); white-space: nowrap;
+}
+.dof-flag.bad { color: var(--danger); border-color: var(--danger); }

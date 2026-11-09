@@ -1,5 +1,6 @@
 //! A simulated Pinscape Pico, for tests and for UI development without
-//! hardware (`PINSCAPE_MOCK=1` makes the app show one).
+//! hardware (`PINSCAPE_MOCK=1` makes the app show one; `PINSCAPE_MOCK=N`
+//! shows a set of `N` from [`fleet`], for the multi-device dashboard).
 //!
 //! It implements the vendor protocol at the byte level: requests are
 //! decoded from the OUT stream, and replies (header + extra data) are
@@ -28,6 +29,12 @@ pub struct MockState {
     pub unit_num: u8,
     pub unit_name: String,
     pub version: (u8, u8, u8),
+    /// XInput player index reported by QUERY_IDS (`None` = 0xFF, not assigned).
+    pub xinput_player_index: Option<u8>,
+    /// LedWiz unit mask reported by QUERY_IDS (bit 0 = LedWiz unit 1).
+    pub led_wiz_unit_mask: u16,
+    /// `USBInterfaces::flags` reported by QUERY_USBIFCS.
+    pub usb_flags: u16,
     /// Stored config files by file ID.
     pub configs: HashMap<u8, Vec<u8>>,
     /// Pending log text (drained by QUERY_LOG).
@@ -62,6 +69,9 @@ impl Default for MockState {
             unit_num: 9,
             unit_name: "Mock Pico".into(),
             version: (1, 0, 2),
+            xinput_player_index: None,
+            led_wiz_unit_mask: 0x0001,
+            usb_flags: 0x0001 | 0x0002 | 0x0004 | 0x0008 | 0x0100 | 0x1000,
             configs: HashMap::new(),
             log,
             clock: None,
@@ -78,6 +88,64 @@ impl Default for MockState {
             plunger: Default::default(),
         }
     }
+}
+
+/// A set of `n` simulated devices (1..=8) for exercising the multi-device
+/// dashboard (`PINSCAPE_MOCK=N`). `fleet(1)` is the single default device that
+/// `PINSCAPE_MOCK=1` has always shown. From two devices on, the set contains
+/// the cross-device problems the dashboard flags:
+///
+/// | # | unit | name            | firmware | notes |
+/// |---|------|-----------------|----------|-------|
+/// | 0 | 9    | Mock Pico       | 1.0.2    | the default device |
+/// | 1 | 1    | Mock Flippers   | 1.0.2    | config stored, XInput player 1, LedWiz units 1+2 |
+/// | 2 | 9    | Mock Spare      | 1.0.1    | duplicate unit 9, older firmware, output test mode on, LedWiz unit 2 (overlap) |
+/// | 3 | 1    | Pinscape        | 1.0.2    | config stored but default identity (looks like Safe Mode), duplicate unit 1 |
+/// | 4+| 10+  | Mock Pico N     | 1.0.2    | unique, no problems |
+pub fn fleet(n: usize) -> Vec<MockState> {
+    const LEDWIZ_CONF: u16 = 0x0200;
+    const XINPUT: u16 = 0x0010 | 0x0020;
+    let base = MockState::default();
+    let hwid = |i: usize| {
+        let mut h = base.hwid;
+        h[7] = (i + 1) as u8;
+        h
+    };
+    let config = |unit: u8, name: &str| format!("{{ id: {{ unitNum: {unit}, unitName: \"{name}\" }} }}\n").into_bytes();
+    (0..n.clamp(1, 8))
+        .map(|i| {
+            let mut s = MockState { hwid: hwid(i), ..MockState::default() };
+            match i {
+                0 => {}
+                1 => {
+                    s.unit_num = 1;
+                    s.unit_name = "Mock Flippers".into();
+                    s.xinput_player_index = Some(0);
+                    s.led_wiz_unit_mask = 0x0003;
+                    s.usb_flags |= XINPUT | LEDWIZ_CONF;
+                    s.configs.insert(proto::config::FILE_MAIN, config(1, "Mock Flippers"));
+                    s.outputs = outputs::State::unconfigured();
+                }
+                2 => {
+                    s.unit_name = "Mock Spare".into();
+                    s.version = (1, 0, 1);
+                    s.led_wiz_unit_mask = 0x0002;
+                    s.usb_flags |= LEDWIZ_CONF;
+                    s.outputs.test_mode = true;
+                }
+                3 => {
+                    s.unit_num = 1;
+                    s.unit_name = "Pinscape".into();
+                    s.configs.insert(proto::config::FILE_MAIN, config(3, "Mock Backbox"));
+                }
+                _ => {
+                    s.unit_num = 6 + i as u8;
+                    s.unit_name = format!("Mock Pico {}", i + 1);
+                }
+            }
+            s
+        })
+        .collect()
 }
 
 /// Transport implementation backed by [`MockState`].
@@ -166,16 +234,18 @@ impl MockDevice {
                 let st = self.state.lock().unwrap();
                 let mut args = st.hwid.to_vec();
                 args.extend_from_slice(&2040u16.to_le_bytes());
-                args.extend_from_slice(&[2, 3, st.unit_num, 0xFF, 0x01, 0x00]);
+                args.extend_from_slice(&[2, 3, st.unit_num, st.xinput_player_index.unwrap_or(0xFF)]);
+                args.extend_from_slice(&st.led_wiz_unit_mask.to_le_bytes());
                 let data = format!("{}\0pico\x002.2.0\x000.18.0\0GNUC 14.3.1\0", st.unit_name).into_bytes();
                 drop(st);
                 self.reply(t, c, Status::Ok, &args, &data);
             }
             cmd::QUERY_USBIFCS => {
+                let flags = self.state.lock().unwrap().usb_flags;
                 let mut d = vec![8, 0];
                 d.extend_from_slice(&proto::DEFAULT_VID.to_le_bytes());
                 d.extend_from_slice(&proto::DEFAULT_PIDS[1].to_le_bytes());
-                d.extend_from_slice(&(0x0001u16 | 0x0002 | 0x0004 | 0x0008 | 0x0100 | 0x1000).to_le_bytes());
+                d.extend_from_slice(&flags.to_le_bytes());
                 self.reply(t, c, Status::Ok, &[], &d);
             }
             cmd::STATS if arg(0) == proto::stats::QUERY_STATS => {
@@ -191,39 +261,7 @@ impl MockDevice {
                 self.reply(t, c, Status::Ok, &[], &d);
             }
             cmd::QUERY_GPIO_CONFIG => {
-                // Matches the simulated buttons in mock/buttons.rs (GP4-GP8) and
-                // IR receiver/transmitter in mock/ir.rs (same usage names as the
-                // firmware's GPIO manager), plus the Pico LED on GP25.
-                const USES: [(usize, &str); 7] = [
-                    (4, "Button #0"),
-                    (5, "Button #1"),
-                    (6, "Button #2"),
-                    (7, "Button #4"),
-                    (8, "Button #5"),
-                    (9, "IR RX"),
-                    (10, "IR TX"),
-                ];
-                let n = 30usize;
-                let mut pool: Vec<u8> = Vec::new();
-                let mut ports: Vec<u8> = Vec::new();
-                let pool_at = 6 + n * 4;
-                for i in 0..n {
-                    let (func, flags, ofs) = match USES.iter().find(|(g, _)| *g == i) {
-                        Some((_, name)) => {
-                            let ofs = (pool_at + pool.len()) as u16;
-                            pool.extend_from_slice(name.as_bytes());
-                            pool.push(0);
-                            (5u8, 0u8, ofs)
-                        }
-                        None if i == 25 => (5, 1, 0),
-                        None => (0x1F, 0, 0),
-                    };
-                    ports.extend_from_slice(&[func, flags]);
-                    ports.extend_from_slice(&ofs.to_le_bytes());
-                }
-                let mut d = vec![6, 0, 4, 0, n as u8, 0];
-                d.extend_from_slice(&ports);
-                d.extend_from_slice(&pool);
+                let d = gpio_config_reply();
                 self.reply(t, c, Status::Ok, &[], &d);
             }
             cmd::SET_CLOCK => {
@@ -350,6 +388,66 @@ impl Default for MockDevice {
     }
 }
 
+/// Simulated GPIO assignments (gpio, function, flags, usage), matching the
+/// simulated devices: buttons on GP4-GP8 and a 74HC165 chain (mock/buttons.rs),
+/// IR receiver/transmitter (mock/ir.rs), output ports on GP15-GP17 and a
+/// TLC5940 chain (mock/outputs.rs), the potentiometer plunger on the Pico ADC
+/// (mock/plunger.rs), an I2C bus with the accelerometer's interrupt line
+/// (mock/nudge.rs), a logger UART, and the Pico LED. GP14, GP27 and GP28 stay
+/// free. Usage names are the firmware GPIO manager's. Function codes: 2 UART,
+/// 3 I2C, 4 PWM, 5 SIO, 6 PIO0; flags: 0x01 output, 0x02 ADC.
+const MOCK_GPIOS: [(usize, u8, u8, &str); 24] = [
+    (0, 2, 0, "UART0 TX"),
+    (1, 5, 0, "MMA8451Q (Interrupt)"),
+    (2, 3, 0, "I2C1 SDA"),
+    (3, 3, 0, "I2C1 SCL"),
+    (4, 5, 0, "Button #0"),
+    (5, 5, 0, "Button #1"),
+    (6, 5, 0, "Button #2"),
+    (7, 5, 0, "Button #4"),
+    (8, 5, 0, "Button #5"),
+    (9, 5, 0, "IR RX"),
+    (10, 4, 0, "IR TX"),
+    (11, 5, 1, "74HC165[0] (SH/LD)"),
+    (12, 5, 1, "74HC165[0] (CLK)"),
+    (13, 5, 0, "74HC165[0] (QH)"),
+    (15, 4, 0, "Output #1 (Left Flipper)"),
+    (16, 4, 0, "Output #2 (Right Flipper)"),
+    (17, 4, 0, "Output #3 (Knocker)"),
+    (18, 5, 1, "TLC5940[0] (BLANK)"),
+    (19, 4, 0, "TLC5940[0] (GSCLK)"),
+    (20, 6, 0, "TLC5940[0] (SCLK)"),
+    (21, 5, 1, "TLC5940[0] (XLAT)"),
+    (22, 6, 0, "TLC5940[0] (SIN)"),
+    (25, 5, 1, "Pico LED"),
+    (26, 0x1F, 2, "Pico ADC"),
+];
+
+/// `GPIOConfig` reply for QUERY_GPIO_CONFIG: header, 30 ports, string pool.
+fn gpio_config_reply() -> Vec<u8> {
+    let n = 30usize;
+    let pool_at = 6 + n * 4;
+    let mut ports: Vec<u8> = Vec::new();
+    let mut pool: Vec<u8> = Vec::new();
+    for i in 0..n {
+        let (func, flags, ofs) = match MOCK_GPIOS.iter().find(|(g, ..)| *g == i) {
+            Some(&(_, func, flags, name)) => {
+                let ofs = (pool_at + pool.len()) as u16;
+                pool.extend_from_slice(name.as_bytes());
+                pool.push(0);
+                (func, flags, ofs)
+            }
+            None => (0x1F, 0, 0),
+        };
+        ports.extend_from_slice(&[func, flags]);
+        ports.extend_from_slice(&ofs.to_le_bytes());
+    }
+    let mut d = vec![6, 0, 4, 0, n as u8, 0];
+    d.extend_from_slice(&ports);
+    d.extend_from_slice(&pool);
+    d
+}
+
 fn disconnected() -> Error {
     Error::Transfer(nusb::transfer::TransferError::Disconnected)
 }
@@ -453,9 +551,28 @@ mod tests {
         assert_eq!(gpio.len(), 30);
         assert_eq!(gpio[4].usage.as_deref(), Some("Button #0"));
         assert_eq!(gpio[8].usage.as_deref(), Some("Button #5"));
+        assert_eq!(gpio[26].usage.as_deref(), Some("Pico ADC"));
+        assert!(gpio[26].adc && gpio[25].output);
+        assert_eq!(gpio[14].usage, None);
         let t = proto::ClockArgs { year: 2026, month: 11, day: 8, hour: 1, minute: 2, second: 3 };
         c.set_clock(t).unwrap();
         assert_eq!(h.lock().unwrap().clock, Some(t));
+    }
+
+    #[test]
+    fn gpio_pinout_covers_every_category() {
+        use proto::pinout::{Category as C, Pinout};
+        let (mut c, _) = client();
+        let p = Pinout::build(&c.query_ids().unwrap(), &c.query_gpio_config().unwrap());
+        assert_eq!(p.board, Some("Raspberry Pi Pico"));
+        assert_eq!(p.header.len(), 40);
+        let cat = |g: usize| p.pins[g].category;
+        assert_eq!(
+            [cat(0), cat(1), cat(2), cat(4), cat(9), cat(13), cat(15), cat(20), cat(25), cat(26), cat(14)],
+            [C::Uart, C::Accel, C::I2c, C::Button, C::Ir, C::Button, C::Output, C::Output, C::System, C::Plunger, C::Free]
+        );
+        assert_eq!(p.free, vec![14, 27, 28]);
+        assert!(p.pins.iter().all(|x| x.warning.is_none()));
     }
 
     #[test]
@@ -465,6 +582,41 @@ mod tests {
         assert_eq!(h.lock().unwrap().last_reset, Some(proto::reset::NORMAL));
         let e = c.ping().unwrap_err();
         assert!(e.is_disconnect(), "{e:?}");
+    }
+
+    #[test]
+    fn fleet_of_one_is_the_default_device() {
+        let f = fleet(1);
+        assert_eq!(f.len(), 1);
+        let mut c = VendorClient::with_transport(Box::new(MockDevice::with_state(f.into_iter().next().unwrap())));
+        let ids = c.query_ids().unwrap();
+        assert_eq!((ids.hwid.as_str(), ids.unit_num, ids.unit_name.as_str()), ("DEADBEEF00000001", 9, "Mock Pico"));
+        assert_eq!(ids.xinput_player_index, None);
+        assert_eq!(ids.led_wiz_unit_mask, 1);
+        assert!(!c.query_usb_interfaces().unwrap().ledwiz_configured);
+    }
+
+    #[test]
+    fn fleet_devices_differ_and_include_problem_cases() {
+        assert_eq!(fleet(0).len(), 1);
+        assert_eq!(fleet(99).len(), 8);
+        let ids: Vec<_> = fleet(8)
+            .into_iter()
+            .map(|s| {
+                let mut c = VendorClient::with_transport(Box::new(MockDevice::with_state(s)));
+                (c.query_ids().unwrap(), c.query_version().unwrap(), c.query_usb_interfaces().unwrap(), c)
+            })
+            .collect();
+        let hwids: std::collections::HashSet<_> = ids.iter().map(|(i, ..)| i.hwid.clone()).collect();
+        assert_eq!(hwids.len(), 8, "hardware IDs must be unique");
+        assert_eq!(ids[0].0.unit_num, ids[2].0.unit_num, "duplicate unit number case");
+        assert_ne!(ids[0].1, ids[2].1, "firmware mismatch case");
+        assert_eq!(ids[1].0.xinput_player_index, Some(0));
+        assert!(ids[1].2.xinput_configured && ids[1].2.ledwiz_configured);
+        assert_eq!(ids[1].0.led_wiz_unit_mask & ids[2].0.led_wiz_unit_mask, 0x0002);
+        assert_eq!(ids[4].0.unit_num, 10);
+        let (.., mut c2) = ids.into_iter().nth(2).unwrap();
+        assert!(c2.query_logical_port_levels().unwrap().test_mode);
     }
 
     #[test]

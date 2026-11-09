@@ -4,7 +4,8 @@
 //!
 //! The default configuration mimics a typical cabinet: flipper/knocker
 //! solenoids on Pico GPIOs, flashers on a TLC5940 chain, motors on a
-//! PCA9685, button lamps on a 74HC595 chain, plus a virtual port. A few
+//! PCA9685, button lamps on a 74HC595 chain, a virtual port, a share group
+//! and a ZB Launch port (so the DOF helper has every port kind). A few
 //! ports animate on their own (an "attract mode" chase and a computed
 //! blinker) so the UI has live data to show.
 
@@ -116,9 +117,16 @@ impl Default for State {
             port(pf::COMPUTED, 0, dt::HC595, 0, "Start Button Lamp", false),
             port(0, 0, dt::HC595, 1, "Launch Button Lamp", false),
             port(0, 0, dt::VIRTUAL, 0, "", false),
+            // Share group "bumpers" (JSONConfigRef outputs[].shareGroup): two
+            // virtual DOF bumper ports sharing one physical solenoid (#14).
+            port(0, 0, dt::SHAREGROUP, 0, "Bumper Back Left", false),
+            port(0, 0, dt::SHAREGROUP, 0, "Bumper Back Center", false),
+            port(pf::FLIPPER_LOGIC | pf::NOISY, 0, dt::GPIO, 18, "Bumper Solenoid", false),
+            // ZB Launch Mode signal from DOF (device type "zblaunch")
+            port(0, 0, dt::ZBLAUNCH, 0, "ZB Launch", false),
         ];
         let devices = vec![
-            gpio_device(&[(15, pt::PWM), (16, pt::PWM), (17, pt::DIGITAL)]),
+            gpio_device(&[(15, pt::PWM), (16, pt::PWM), (17, pt::DIGITAL), (18, pt::DIGITAL)]),
             MockOutDev::new(
                 RawDevDesc { addr: 0, num_ports: 32, num_ports_per_chip: 16, pwm_res: 4096, config_index: 0, dev_type: dt::TLC5940 },
                 vec![pt::PWM; 32],
@@ -363,7 +371,7 @@ mod tests {
     fn config_query() {
         let (mut c, _) = client();
         let ports = c.query_logical_ports().unwrap();
-        assert_eq!(ports.len(), 11);
+        assert_eq!(ports.len(), 15);
         assert_eq!(ports[0].port, 1);
         assert_eq!(ports[0].name.as_deref(), Some("Left Flipper"));
         assert!(ports[0].flipper_logic && ports[0].noisy);
@@ -371,6 +379,10 @@ mod tests {
         assert_eq!(ports[5].name, None);
         assert!(!ports[5].named);
         assert_eq!(ports[10].dev_type_name, "Virtual");
+        assert_eq!((ports[11].dev_type, ports[11].name.as_deref()), (dt::SHAREGROUP, Some("Bumper Back Left")));
+        assert_eq!(ports[12].dev_type, dt::SHAREGROUP);
+        assert_eq!((ports[13].dev_type, ports[13].dev_port), (dt::GPIO, 18));
+        assert_eq!((ports[14].dev_type_name, ports[14].name.as_deref()), ("ZB Launch", Some("ZB Launch")));
         assert_eq!(c.query_logical_port_name(3).unwrap(), "Knocker");
 
         let devs = c.query_output_devices_full().unwrap();
@@ -378,6 +390,7 @@ mod tests {
         assert_eq!(devs[0].dev_type_name, "GPIO");
         assert_eq!(devs[0].port_types[15], pt::PWM);
         assert_eq!(devs[0].port_types[17], pt::DIGITAL);
+        assert_eq!(devs[0].port_types[18], pt::DIGITAL);
         assert_eq!(devs[0].port_types[0], pt::UNUSED);
         assert_eq!((devs[1].num_ports, devs[1].num_ports_per_chip, devs[1].pwm_res), (32, 16, 4096));
         assert_eq!(devs[1].first_port, 30);

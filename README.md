@@ -64,18 +64,60 @@ the simulated device (`cargo test`), unless marked otherwise.
       reboot; config preserved byte-identical
 - [x] `.deb` / `.rpm` / AppImage build locally; `.deb` contents (udev rule, post-install script)
 - [x] Preferences dialog opens with Ctrl+, and closes with Esc; Ctrl+2 switches tabs (simulator)
+- [x] Config tab: save to the device with "reboot after saving" (reconnects and reloads), automatic
+      backup on every save, restore from **Backups…**, Import / Export file dialogs, **New from template**,
+      Reload from device (discard prompt)
+- [x] Safe-Mode Config tab: save from the Safe Mode template; **Safe Mode** button boots into it
+- [x] Overview **Reboot**, **Safe Mode** and **Boot Loader** buttons
+- [x] **Print…** on Linux: line-numbered PDF with header; editor minimap repainted afterwards
+- [x] Firmware tab: install from the file dialog with progress and reconnect; downgrade v1.0.2 → v1.0.1
+      and upgrade back; a `-pico2.uf2` is refused on the RP2040
+- [x] New-device setup: blank Pico (after **erase entire flash**) installed from the sidebar
+- [x] `pinscape erase-flash --config --dry-run` (Pico in boot loader mode) lists the directory and files;
+      `--config` erase restarts with factory defaults and keeps the firmware; `--all` from a running device
+      erases 2048 KB (detected) and leaves the Pico in boot loader mode
+- [x] Boot-loader Pico with no Pinscape device: the sidebar shows it and doesn't say "No devices"
+- [x] Plunger: after the config area was erased, **Restore saved calibration** put the calibration back
+- [x] Pinout tab on the RP2040: labels match the Overview GPIO table and the wiring (button GP2,
+      output GP3, potentiometer on GP26 / ADC0)
+- [x] DOF tab on a real config: unit number, Feedback Controller state and the port table
+- [x] Release workflow dry run (manual, no tag): all four builds pass and upload the `.deb`, `.rpm`,
+      AppImage, `.msi`, NSIS `.exe`, `.dmg`, `.app.tar.gz` and the CLI archives; CI green on all three OSes
 
 ### Still to test
 
 **Config & device management**
-- [ ] Save a config to the device from the app's Config tab (incl. "reboot after saving")
-- [ ] Safe-Mode Config tab: save, and booting into Safe Mode
-- [ ] Automatic backup made on save; restore one from **Backups…**
-- [ ] Import / Export file dialogs; **New from template**
-- [ ] Overview buttons: Safe Mode, Factory Mode, Boot Loader, Erase Config
+- [ ] Overview **Erase Config…** button
+- [ ] Overview **Factory Mode**: firmware v1.0.2 ignores the request (upstream `VendorIfc.cpp` has no
+      case for `SUBCMD_RESET_FACTORY`, so the upstream Windows tool is affected too); retest when fixed upstream
+- [ ] A Pico that reboots while the app runs and is briefly "No permission to open" (udev not done yet)
+      is picked up again within ~2 s without replugging
 - [ ] Two or more Picos connected at once (selection, `--id` in the CLI)
+- [ ] **All devices** dashboard with two real Picos: both cards show live uptime/loop
+      time; clicking a card opens that device's Overview; **Reboot…** asks, and the card
+      comes back after the reboot
+- [ ] Dashboard warnings on real hardware: give two Picos the same `id.unitNum` (duplicate
+      unit), run different firmware versions on them (mismatch); switching from the Outputs
+      tab in test mode to the dashboard ends test mode, so no test-mode warning remains;
+      one Pico in BOOTSEL and one "in use" (CLI open) both get cards
+- [ ] Dashboard with a single Pico looks fine; the dashboard stops polling when you leave
+      it (no extra USB traffic, `PINSCAPE_TRACE=1`)
 - [ ] App's permission-help panel (unplug, remove the udev rule, replug)
-- [ ] **Print…** on the Config tab: line-numbered listing with header on Linux, Windows and macOS; app looks normal afterwards
+- [ ] **Print…** on the Config tab on Windows and macOS (Linux done): line-numbered listing with header; app looks normal afterwards
+
+**Config form view** (no device writes needed except the last item)
+- [ ] **Text | Form** switch on Config and Safe-Mode Config; choice remembered after a restart; the text editor looks normal (size, cursor) after switching back
+- [ ] Form on the DIY / Pro templates: buttons, outputs and id sections show the right values; long lists scroll smoothly; expand / collapse all
+- [ ] Change a value in the form (number, text, drop-down, check box), switch to Text: only that value changed, comments and blank lines untouched, no "unsaved" badge if changed back
+- [ ] **+ Add entry** on buttons and outputs: new entry indented like its neighbours (also on a CRLF file and a tab-indented file); **Duplicate** and **Remove** (label comment above goes with it)
+- [ ] Change a button source `type` (gpio → pca9555): fields change; leftover `gp` shown as not valid with ✕
+- [ ] Undo / Redo buttons and Ctrl+Z / Ctrl+Y (outside text boxes) undo form edits one at a time; Ctrl+Z in the text editor afterwards undoes them too
+- [ ] Add a section that isn't in the file (e.g. plunger), then a property in it
+- [ ] A file with a syntax error: the form shows the message; the button jumps to the error in the text view; Problems-list clicks switch to the text view
+- [ ] Empty editor: the form says so and points to templates / text view
+- [ ] **help** links open the reference pane at the right property; F1-style help in nested fields
+- [ ] Dark theme and Small / Large text size in the form
+- [ ] Ctrl+S in the form view saves (same checks, confirmation and backup as the text view); saving to the device works after form edits
 
 **Outputs** (needs an output wired, e.g. an LED + resistor on GP3)
 - [ ] Set a logical port level from the slider and 0/255 buttons
@@ -85,6 +127,14 @@ the simulated device (`cargo test`), unless marked otherwise.
 - [ ] **All off**
 - [ ] Other output chips: TLC5940, TLC59116, TLC5947, PCA9685, PCA9555, 74HC595, PWMWorker
 - [ ] PWMWorker **Reset** / **Boot loader** buttons
+
+**DOF tab**
+- [ ] Table matches the `outputs` array for a config with many ports and several chip types (one GPIO port checked)
+- [ ] Unit number shown matches `id.unitNum`; with a second Pico on the same unit number the conflict error appears (and clears after renumbering + reboot)
+- [ ] `feedbackController: { enable: false }` shows the "DOF can't see this Pico" error
+- [ ] **Copy port list** / **Copy CSV** paste correctly; **Save CSV…** opens in a spreadsheet (names with commas/quotes intact); **Save port list…** writes a `.txt`
+- [ ] On Windows with a current DOF install: assign ports in the DOF Config Tool (Cabinet › Devices › Port Assignments) from the exported list, install the generated config, and check that DOF fires the expected outputs (e.g. flipper, shaker) in a table
+- [ ] Check the guidance text against the DOF Config Tool's actual menu and device names
 
 **Buttons** (needs wiring)
 - [ ] Real key / gamepad / XInput actions on the PC
@@ -112,20 +162,23 @@ the simulated device (`cargo test`), unless marked otherwise.
 - [ ] Image sensors (TCD1103 / TSL1410R / TSL1412S) pixel view and integration time
 - [ ] Quadrature (AEDR8300) and proximity (VCNL4010 / VL6180X) sensors
 - [ ] Confirm calibration values are native sensor units (the header says 0–65535)
-- [ ] **Record CSV**; after a reset that loses settings, **Restore saved calibration** puts the calibration back
+- [ ] Plunger **Record CSV**
+
+**Pinout tab** (any Pinscape Pico; no extra wiring needed)
+- [ ] Pico 2 (RP2350): diagram shown with "RP2350" on the chip; Pico W / Pico 2 W build (if available) shows the wireless-chip pins under "Not on the header"
+- [ ] A non-standard board (e.g. an RP2350B board, or another build target) shows the "isn't a standard Pico layout" note and the GPIO list instead of a diagram
+- [ ] Hover, focus (Tab, arrow keys) and click show the full assignment; a screen reader reads each pin's description
+- [ ] Legend click highlights one category; light and dark themes and Small / Large text size look right
+- [ ] Change the config (e.g. add a button on a free GPIO), save with reboot: the tab updates by itself within a few seconds
 
 **Firmware**
-- [ ] Install from the app's Firmware tab (file dialog and drag-and-drop, progress window,
+- [ ] Install by drag-and-drop (file dialog done) (progress window,
       reconnect, new version shown)
-- [ ] New-device setup: a Pico in BOOTSEL mode without Pinscape, from the sidebar
-- [ ] Upgrade / downgrade to a different firmware version
 - [ ] Pico 2 (RP2350): PICOBOOT reboot, family check
-- [ ] Mass-storage fallback (copy to the RPI-RP2 drive)
-- [ ] Wrong-chip image is refused (e.g. a `-pico2.uf2` on an RP2040)
+- [ ] Mass-storage fallback (copy to the RPI-RP2 drive). Needs the drive mounted: desktops without an automounter (e.g. Hyprland) get the "no mounted boot drive" message
 - [ ] Dropping a `.uf2` on any tab (not just Firmware) opens the install dialog; with two Picos the target picker works
-- [ ] **Erase Pinscape config** (boot loader): Pico restarts with factory defaults, firmware kept (RP2040 and RP2350)
-- [ ] **Erase entire flash**, from a running device and from a boot-loader Pico: Pico comes back in boot loader mode, detected flash size is right; reinstall firmware afterwards
-- [ ] `pinscape erase-flash --config --dry-run` with a Pico in boot loader mode lists the directory and files
+- [ ] **Erase Pinscape config…** / **Erase entire flash…** buttons in the app (done with the CLI on RP2040), and on an RP2350
+- [ ] **Erase entire flash** starting from a Pico already in boot loader mode
 - [ ] Erase on a clone with 4 / 8 / 16 MB flash
 
 **Preferences, shortcuts & shell**
@@ -140,20 +193,16 @@ the simulated device (`cargo test`), unless marked otherwise.
 - [ ] Help tab / reference pane: https and mjrnet.org links open in the browser; links between help pages stay in the frame
 - [ ] All shortcuts (list in Help › Keyboard shortcuts), incl. F1 with and without editor focus, Ctrl+Shift+R confirmation, Cmd on macOS
 - [ ] Tab bar arrow / Home / End keys; keyboard focus outlines; Esc closes the topmost dialog first
-- [ ] Boot-loader Pico with no Pinscape device: the sidebar doesn't say "No devices"
 
 **Releases & auto-update** (need a tagged release; see [docs/RELEASING.md](docs/RELEASING.md))
 - [ ] Tag push creates one draft release; all four build jobs (Linux, Windows, macOS arm64 and x64) upload into it
-- [ ] Draft contains the `.deb`, `.rpm`, AppImage, `.msi`, NSIS `.exe`, both `.dmg`s and the CLI archives
+- [ ] Draft contains the files (the manual dry run's artifacts had them all)
 - [ ] macOS ad-hoc signing works for both architectures
 - [ ] With the updater key and pubkey set: `.sig` files and `latest.json` (all platforms, `/download/vX.Y.Z/` URLs); with only one of them set the build fails
 - [ ] End to end: install 0.x.0, publish 0.x.1, the notice appears, Install and restart works (AppImage, NSIS, MSI, macOS); `.deb`/`.rpm` show **Download…**
-- [ ] A manual workflow run without a tag only uploads workflow artifacts
 - [ ] Optional code signing with real certificates (Apple Developer ID + notarization, Windows `.pfx`)
-- [ ] Linux CI and release builds work with the trimmed build packages (no `libxdo-dev`, `libssl-dev`, `libayatana-appindicator3-dev`)
 
 **Platforms & packaging**
-- [ ] First green CI run on Ubuntu, Windows and macOS
 - [ ] Windows: device access via WinUSB, NSIS `.exe` and `.msi` installers, RP2040 firmware
       update via the mass-storage fallback
 - [ ] macOS: device access, `.dmg`, Gatekeeper warning for the unsigned app
@@ -366,6 +415,10 @@ Environment variables:
 - `PINSCAPE_TRACE=1` logs USB reads.
 - `PINSCAPE_MOCK=1` adds a simulated device to the app, for UI work without a Pico:
   `PINSCAPE_MOCK=1 npm run tauri dev`. The simulator has buttons, outputs and IR activity.
+  `PINSCAPE_MOCK=4` (up to 8) adds several simulated devices for the **All devices**
+  dashboard, including a duplicate unit number, an older firmware version, overlapping
+  LedWiz units and output test mode left on; from 3 on, also a device "in use by another
+  program".
 - `PINSCAPE_MOCK_BOOTLOADER=1` adds a simulated Pico in boot loader mode.
 - `PINSCAPE_START_TAB=<tab>` and `PINSCAPE_START_DEVICE=<hardware ID>` choose the
   tab and device shown at startup (e.g. `PINSCAPE_START_DEVICE=DEADBEEF00000001` for the simulator).

@@ -5,11 +5,15 @@
 //! Commands are addressed by device key (the hardware ID).
 
 mod buttons;
+mod dof;
+mod dashboard;
+mod configform;
 mod files;
 mod firmware;
 mod ir;
 mod nudge;
 mod outputs;
+mod pinout;
 mod plunger;
 mod prefs;
 mod session;
@@ -230,6 +234,8 @@ pub fn run() {
             config_completions,
             config_hover,
             config_breadcrumb,
+            configform::config_form,
+            configform::config_form_edit,
             platform,
             dev_options,
             files::list_templates,
@@ -255,12 +261,14 @@ pub fn run() {
             outputs::outputs_set_night_mode,
             outputs::outputs_all_off,
             outputs::outputs_pwm_worker_reset,
+            dof::dof_report,
             ir::ir_poll,
             ir::ir_send,
             ir::ir_set_tv_relay,
             ir::ir_config_status,
             ir::ir_parse_code,
             ir::ir_protocols,
+            pinout::gpio_pinout,
             nudge::nudge_status,
             nudge::nudge_params,
             nudge::nudge_put_params,
@@ -290,6 +298,7 @@ pub fn run() {
             firmware::bootloader_erase,
             updater::updater_status,
             updater::updater_open_releases,
+            dashboard::dashboard_poll,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

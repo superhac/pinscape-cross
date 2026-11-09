@@ -2,6 +2,7 @@
 // with a header. The listing is a print-only element; @media print in
 // styles.css hides the app while it's present.
 import { api } from "../api";
+import { monaco } from "../editor/monaco";
 
 export async function printListing(opts: { title: string; subtitle?: string; text: string }) {
   document.getElementById("print-root")?.remove();
@@ -42,6 +43,7 @@ export async function printListing(opts: { title: string; subtitle?: string; tex
     document.body.classList.remove("printing");
     root.remove();
     window.removeEventListener("afterprint", cleanup);
+    redrawEditors();
   };
   window.addEventListener("afterprint", cleanup);
   // Let the listing lay out before the print dialog snapshots the page.
@@ -53,7 +55,24 @@ export async function printListing(opts: { title: string; subtitle?: string; tex
   } catch {
     window.print();
   }
+  // WebKitGTK clears the editor's canvases (the minimap) while rendering for
+  // print and Monaco doesn't notice; redraw once the print dialog is done
+  // (the window gets focus back), and after a delay in case it never lost it.
+  window.addEventListener("focus", () => setTimeout(redrawEditors, 100), { once: true });
+  setTimeout(redrawEditors, 1500);
   // The listing stays in the DOM (display:none on screen) until afterprint or
   // the next print: the native call can return before the page is rendered
   // for printing, and some webviews never fire afterprint.
+}
+
+/** Make every Monaco editor repaint, its minimap canvas included. */
+function redrawEditors() {
+  for (const e of monaco.editor.getEditors()) {
+    // A plain render(true) doesn't repaint the minimap; re-creating it does.
+    if (e.getOption(monaco.editor.EditorOption.minimap).enabled) {
+      e.updateOptions({ minimap: { enabled: false } });
+      e.updateOptions({ minimap: { enabled: true } });
+    }
+    e.render(true);
+  }
 }

@@ -14,7 +14,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use chrono::{Datelike, Timelike};
 use pinscape_protocol::{ClockArgs, DeviceIds, Version};
@@ -50,11 +50,19 @@ struct Worker {
 struct State {
     /// Keyed by `DeviceSnapshot::key`.
     devices: HashMap<String, Worker>,
-    /// Devices that failed to open, keyed by nusb device id, so we don't retry every second.
-    failed: HashMap<usb::DeviceId, DeviceSnapshot>,
+    /// Devices that failed to open, keyed by nusb device id, with the time of the last
+    /// attempt. They're retried every `FAILED_RETRY` while present: a Pico that just
+    /// rebooted can be seen before udev has applied its permissions, and a device that
+    /// another program held ("busy") becomes free when that program closes.
+    failed: HashMap<usb::DeviceId, (DeviceSnapshot, Instant)>,
     /// nusb device ids currently owned by a worker.
     owned: HashMap<usb::DeviceId, String>,
+    /// Simulated devices that "failed to open" (PINSCAPE_MOCK=3 or more).
+    mock_failed: Vec<DeviceSnapshot>,
 }
+
+/// How often a device that failed to open is tried again while it stays plugged in.
+const FAILED_RETRY: Duration = Duration::from_secs(2);
 
 #[derive(Clone)]
 pub struct Manager {
@@ -65,8 +73,8 @@ pub struct Manager {
 impl Manager {
     pub fn start(app: AppHandle) -> Manager {
         let m = Manager { state: Arc::default(), app };
-        if std::env::var_os("PINSCAPE_MOCK").is_some() {
-            m.add_mock();
+        if let Some(n) = std::env::var_os("PINSCAPE_MOCK") {
+            m.add_mocks(n.to_str().and_then(|s| s.trim().parse().ok()).unwrap_or(1));
         }
         let watcher = m.clone();
         thread::Builder::new()
@@ -83,7 +91,8 @@ impl Manager {
     pub fn snapshot(&self) -> Vec<DeviceSnapshot> {
         let st = self.state.lock().unwrap();
         let mut v: Vec<_> = st.devices.values().map(|w| w.snapshot.clone()).collect();
-        v.extend(st.failed.values().cloned());
+        v.extend(st.failed.values().map(|(s, _)| s.clone()));
+        v.extend(st.mock_failed.iter().cloned());
         v.sort_by_key(|d| (d.ids.as_ref().map(|i| i.unit_num).unwrap_or(u8::MAX), d.key.clone()));
         v
     }
@@ -113,11 +122,15 @@ impl Manager {
             let id = c.info.id();
             {
                 let st = self.state.lock().unwrap();
-                if st.owned.contains_key(&id) || st.failed.contains_key(&id) {
+                if st.owned.contains_key(&id) {
                     continue;
                 }
+                if let Some((_, at)) = st.failed.get(&id) {
+                    if at.elapsed() < FAILED_RETRY {
+                        continue;
+                    }
+                }
             }
-            changed = true;
             let s = c.summary();
             match open_and_identify(&c) {
                 Ok((client, ids, version)) => {
@@ -132,7 +145,9 @@ impl Manager {
                         error_kind: None,
                     };
                     let tx = self.spawn_worker(key.clone(), Some(id), client);
+                    changed = true;
                     let mut st = self.state.lock().unwrap();
+                    st.failed.remove(&id);
                     st.owned.insert(id, key.clone());
                     st.devices.insert(key, Worker { tx, snapshot });
                 }
@@ -150,7 +165,13 @@ impl Manager {
                             _ => "other",
                         }),
                     };
-                    self.state.lock().unwrap().failed.insert(id, snapshot);
+                    let mut st = self.state.lock().unwrap();
+                    // Only a new or different failure changes what the UI shows.
+                    let same = st.failed.get(&id).is_some_and(|(old, _)| {
+                        old.error == snapshot.error && old.error_kind == snapshot.error_kind
+                    });
+                    changed |= !same;
+                    st.failed.insert(id, (snapshot, Instant::now()));
                 }
             }
         }
@@ -160,9 +181,28 @@ impl Manager {
         }
     }
 
-    /// Attach a simulated device (PINSCAPE_MOCK=1), for UI work without hardware.
-    fn add_mock(&self) {
-        let mut client = VendorClient::with_transport(Box::new(usb::mock::MockDevice::new()));
+    /// Attach simulated devices, for UI work without hardware: `PINSCAPE_MOCK=1`
+    /// adds one, `PINSCAPE_MOCK=N` (up to 8) adds the set from `usb::mock::fleet`,
+    /// and from 3 on also an entry for a device "in use by another program".
+    fn add_mocks(&self, n: usize) {
+        for state in usb::mock::fleet(n) {
+            self.add_mock(state);
+        }
+        if n >= 3 {
+            self.state.lock().unwrap().mock_failed.push(DeviceSnapshot {
+                key: "usb:mock-busy".into(),
+                vid: pinscape_protocol::DEFAULT_VID,
+                pid: pinscape_protocol::DEFAULT_PIDS[1],
+                ids: None,
+                version: None,
+                error: Some(usb::Error::Busy.to_string()),
+                error_kind: Some("busy"),
+            });
+        }
+    }
+
+    fn add_mock(&self, state: usb::mock::MockState) {
+        let mut client = VendorClient::with_transport(Box::new(usb::mock::MockDevice::with_state(state)));
         let (Ok(ids), Ok(version)) = (client.query_ids(), client.query_version()) else { return };
         let key = ids.hwid.clone();
         let snapshot = DeviceSnapshot {

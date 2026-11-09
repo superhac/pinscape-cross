@@ -1,16 +1,28 @@
 import { useEffect, useRef, useState } from "react";
 import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { api, Breadcrumb, DeviceSnapshot, Diagnostic, Template } from "../api";
+import { api, Breadcrumb, DeviceSnapshot, Diagnostic, EditorRange, Template } from "../api";
 import { confirm } from "../lib/confirm";
 import TemplatePicker from "../lib/TemplatePicker";
 import { setDirty } from "../lib/dirty";
 import ConfigEditor, { ConfigEditorHandle } from "../editor/ConfigEditor";
 import HelpPane from "../editor/HelpPane";
+import FormView from "../editor/FormView";
 import BackupPicker from "../lib/BackupPicker";
 import { getPrefs, usePrefs } from "../prefs/store";
 import { printListing } from "../shell/print";
 
 const JSON_FILTER = [{ name: "Pinscape config", extensions: ["json", "json5", "txt"] }];
+
+/** Text or Form view, remembered across sessions (per-user convenience only). */
+type EditView = "text" | "form";
+const VIEW_KEY = "pinscape.configView";
+const savedView = (): EditView => {
+  try {
+    return localStorage.getItem(VIEW_KEY) === "form" ? "form" : "text";
+  } catch {
+    return "text";
+  }
+};
 
 interface Props {
   dev: DeviceSnapshot;
@@ -35,6 +47,21 @@ export default function ConfigTab({ dev, safeMode, visible, onStatus }: Props) {
   const [help, setHelp] = useState<{ page: string; anchor: string | null } | null>(null);
   const [showProblems, setShowProblems] = useState(true);
   const editor = useRef<ConfigEditorHandle>(null);
+  const [view, setViewState] = useState<EditView>(savedView);
+  const [formSection, setFormSection] = useState<string | null>(null);
+  const setView = (v: EditView) => {
+    setViewState(v);
+    try {
+      localStorage.setItem(VIEW_KEY, v);
+    } catch {
+      /* not remembered */
+    }
+  };
+  /** Select a range in the text view (switching to it from the form view). */
+  const reveal = (d: { range: EditorRange }) => {
+    setView("text");
+    setTimeout(() => editor.current?.reveal(d), 0);
+  };
 
   const dirty = original !== null && text !== original;
   const what = safeMode ? "Safe Mode config" : "config";
@@ -45,7 +72,8 @@ export default function ConfigTab({ dev, safeMode, visible, onStatus }: Props) {
   }, [dirtyId, dirty]);
   useEffect(() => () => setDirty(dirtyId, false), [dirtyId]);
   useEffect(() => {
-    if (visible) setTimeout(() => editor.current?.focus(), 0);
+    if (visible && view === "text") setTimeout(() => editor.current?.focus(), 0);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible]);
   const warnings = diags.filter((d) => d.severity === "warning");
 
@@ -130,7 +158,7 @@ export default function ConfigTab({ dev, safeMode, visible, onStatus }: Props) {
     if (errs.length) {
       setDiags(fresh);
       setShowProblems(true);
-      editor.current?.reveal(errs[0]);
+      reveal(errs[0]);
       setMsg(`Not saved: ${errs.length} syntax error${errs.length > 1 ? "s" : ""}. Only a valid file can be saved to the device.`);
       return;
     }
@@ -206,6 +234,14 @@ export default function ConfigTab({ dev, safeMode, visible, onStatus }: Props) {
           Print…
         </button>
         <span className="sep" />
+        <span className="ff-seg" role="group" aria-label="Editor view">
+          <button className={view === "text" ? "active" : ""} aria-pressed={view === "text"} onClick={() => setView("text")} title="Edit the config as text">
+            Text
+          </button>
+          <button className={view === "form" ? "active" : ""} aria-pressed={view === "form"} onClick={() => setView("form")} title="Edit common sections with a form (changes go into the text)">
+            Form
+          </button>
+        </span>
         <button onClick={() => (help ? setHelp(null) : openHelp(crumb?.helpAnchor ?? null))} title="F1 in the editor opens help for the property under the cursor">
           {help ? "Hide reference" : "Reference"}
         </button>
@@ -233,16 +269,33 @@ export default function ConfigTab({ dev, safeMode, visible, onStatus }: Props) {
 
       <div className={"editor-split" + (help ? " with-help" : "")}>
         <div className="editor-col">
-          <ConfigEditor
-            ref={editor}
-            value={text}
-            onChange={setText}
-            onDiagnostics={setDiags}
-            onBreadcrumb={setCrumb}
-            onHelp={openHelp}
-            onSave={save}
-            readOnly={busy}
-          />
+          {view === "form" && (
+            <FormView
+              text={text}
+              section={formSection}
+              onSection={setFormSection}
+              readOnly={busy}
+              apply={(base, r) => editor.current?.applyEdits(base, r.edits) ?? false}
+              onHelp={openHelp}
+              onShowText={(range) => (range ? reveal({ range }) : setView("text"))}
+              onUndo={() => editor.current?.undo()}
+              onRedo={() => editor.current?.redo()}
+              onSave={save}
+            />
+          )}
+          {/* The text editor stays mounted in the form view: form edits go through its model (undo history). */}
+          <div style={{ display: view === "text" ? "contents" : "none" }}>
+            <ConfigEditor
+              ref={editor}
+              value={text}
+              onChange={setText}
+              onDiagnostics={setDiags}
+              onBreadcrumb={setCrumb}
+              onHelp={openHelp}
+              onSave={save}
+              readOnly={busy}
+            />
+          </div>
           <div className="problems">
             <button className="problems-head" onClick={() => setShowProblems(!showProblems)} aria-expanded={showProblems}>
               <span>{showProblems ? "▾" : "▸"} Problems</span>
@@ -259,11 +312,11 @@ export default function ConfigTab({ dev, safeMode, visible, onStatus }: Props) {
                   <li
                     key={i}
                     tabIndex={0}
-                    onClick={() => editor.current?.reveal(d)}
+                    onClick={() => reveal(d)}
                     onKeyDown={(e) => {
                       if (e.key === "Enter" || e.key === " ") {
                         e.preventDefault();
-                        editor.current?.reveal(d);
+                        reveal(d);
                       }
                     }}
                   >

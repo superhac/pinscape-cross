@@ -358,6 +358,7 @@ pub mod buttons;
 pub mod ir;
 pub mod nudge;
 pub mod outputs;
+pub mod pinout;
 pub mod plunger;
 pub mod uf2;
 

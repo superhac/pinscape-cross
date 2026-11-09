@@ -12,10 +12,13 @@ import HelpTab from "./tabs/HelpTab";
 import ButtonsTab from "./tabs/ButtonsTab";
 import OutputsTab from "./tabs/OutputsTab";
 import IrTab from "./tabs/IrTab";
+import DofTab from "./tabs/DofTab";
 import NudgeTab from "./tabs/NudgeTab";
 import PlungerTab from "./tabs/PlungerTab";
 import FirmwareTab from "./tabs/FirmwareTab";
+import PinoutTab from "./tabs/PinoutTab";
 import BootLoaderList from "./firmware/BootLoaderList";
+import Dashboard, { DASHBOARD, DashboardEntry } from "./dashboard/Dashboard";
 import UpdateNotice from "./updater/UpdateNotice";
 import { firmwareApi } from "./lib/api-firmware";
 import { getPrefs, loadPrefs, onPrefsSaveError, subscribePrefs, updatePrefs } from "./prefs/store";
@@ -28,14 +31,14 @@ import { modName, useIsMac } from "./shell/platform";
 import { GearIcon, InfoIcon } from "./shell/icons";
 
 // Tabs planned per docs/PLAN.md §3.
-const TABS = ["Overview", "Config", "Safe-Mode Config", "Log", "Buttons", "Outputs", "Nudge", "Plunger", "IR", "Firmware", "Help"] as const;
+const TABS = ["Overview", "Config", "Safe-Mode Config", "Log", "Buttons", "Outputs", "Nudge", "Plunger", "IR", "Pinout", "DOF", "Firmware", "Help"] as const;
 type Tab = (typeof TABS)[number];
-const READY: Tab[] = ["Overview", "Config", "Safe-Mode Config", "Log", "Buttons", "Outputs", "Nudge", "Plunger", "IR", "Firmware", "Help"];
+const READY: Tab[] = ["Overview", "Config", "Safe-Mode Config", "Log", "Buttons", "Outputs", "Nudge", "Plunger", "IR", "Pinout", "DOF", "Firmware", "Help"];
 
 export default function App() {
   const devices = useDevices();
   const [selected, setSelected] = useState<string | null>(null);
-  const [tab, setTab] = useState<Tab>("Overview");
+  const [tab, setTab] = useState<Tab | typeof DASHBOARD>("Overview");
   const [status, setStatus] = useState("");
   // Config tabs are mounted on first visit and then kept (hidden), so unsaved
   // edits survive switching tabs.
@@ -108,7 +111,7 @@ export default function App() {
       loadPrefs(),
     ]).then(([o, p]) => {
       const wantTab = o.startTab ?? (p.startup.rememberTab ? p.startup.lastTab : null);
-      const t = TABS.find((x) => x.toLowerCase() === wantTab?.toLowerCase());
+      const t = [...TABS, DASHBOARD].find((x) => x.toLowerCase() === wantTab?.toLowerCase());
       if (t) setTab(t);
       const wantDev = o.startDevice ?? (p.startup.rememberDevice ? p.startup.lastDevice : null);
       if (wantDev) setSelected(wantDev);
@@ -138,7 +141,9 @@ export default function App() {
     if (started && devKey && s.rememberDevice && s.lastDevice !== devKey) updatePrefs({ startup: { lastDevice: devKey } });
   }, [started, devKey]);
 
-  const tabIdx = TABS.indexOf(tab);
+  const tabIdx = TABS.indexOf(tab as Tab);
+  // The dashboard replaces the tab bar and panel; the panel stays mounted (unsaved edits) but no tab is "visible".
+  const hideTabs = tab === DASHBOARD ? { display: "none" } : undefined;
   const goTab = (i: number, focus = false) => {
     const n = TABS.length;
     const j = ((i % n) + n) % n;
@@ -202,8 +207,17 @@ export default function App() {
           </p>
         )}
         <ul aria-label="Devices">
+          <DashboardEntry count={devices.length + bootCount} active={tab === DASHBOARD} onClick={() => setTab(DASHBOARD)} />
           {devices.map((d) => (
-            <DeviceItem key={d.key} d={d} active={d.key === selected} onClick={() => setSelected(d.key)} />
+            <DeviceItem
+              key={d.key}
+              d={d}
+              active={tab !== DASHBOARD && d.key === selected}
+              onClick={() => {
+                setSelected(d.key);
+                if (tab === DASHBOARD) setTab("Overview");
+              }}
+            />
           ))}
         </ul>
         {selected && !dev && devices.length > 0 && (
@@ -214,7 +228,19 @@ export default function App() {
       </aside>
 
       <main>
-        <nav className="tabs" role="tablist" aria-label="Device views" onKeyDown={onTabKey}>
+        {tab === DASHBOARD && (
+          <section className="content">
+            <Dashboard
+              devices={devices}
+              onOpen={(k) => {
+                setSelected(k);
+                setTab("Overview");
+              }}
+              onStatus={setStatus}
+            />
+          </section>
+        )}
+        <nav className="tabs" role="tablist" aria-label="Device views" onKeyDown={onTabKey} style={hideTabs}>
           {TABS.map((t, i) => (
             <button
               key={t}
@@ -234,7 +260,7 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <section className="content" role="tabpanel" id="tabpanel" aria-labelledby={`tab-${tabIdx}`}>
+        <section className="content" role="tabpanel" id="tabpanel" aria-labelledby={`tab-${tabIdx}`} style={hideTabs}>
           <HelpTab visible={tab === "Help"} />
           {broken ? (
             tab !== "Help" && <DeviceProblem dev={broken} />
@@ -245,6 +271,7 @@ export default function App() {
           ) : (
             <>
               {tab === "Overview" && <OverviewTab dev={dev} onStatus={setStatus} />}
+              {tab === "Pinout" && <PinoutTab key={dev.key + ":pinout"} dev={dev} onStatus={setStatus} />}
               {visited.has(`${dev.key}:Config`) && (
                 <ConfigTab key={dev.key + ":main"} dev={dev} safeMode={false} visible={tab === "Config"} onStatus={setStatus} />
               )}
@@ -256,10 +283,11 @@ export default function App() {
               <ButtonsTab key={dev.key + ":buttons"} dev={dev} visible={tab === "Buttons"} onStatus={setStatus} />
               <OutputsTab key={dev.key + ":outputs"} dev={dev} visible={tab === "Outputs"} onStatus={setStatus} />
               <IrTab key={dev.key + ":ir"} dev={dev} visible={tab === "IR"} onStatus={setStatus} />
+              <DofTab key={dev.key + ":dof"} dev={dev} visible={tab === "DOF"} onStatus={setStatus} />
               <NudgeTab key={dev.key + ":nudge"} dev={dev} visible={tab === "Nudge"} onStatus={setStatus} />
               <PlungerTab key={dev.key + ":plunger"} dev={dev} visible={tab === "Plunger"} onStatus={setStatus} />
               <FirmwareTab key={dev.key + ":firmware"} dev={dev} visible={tab === "Firmware"} onStatus={setStatus} />
-              {!READY.includes(tab) && (
+              {!READY.includes(tab as Tab) && tab !== DASHBOARD && (
                 <div className="empty">
                   <p className="muted">{tab}: coming in a later phase (see docs/PLAN.md §8).</p>
                 </div>

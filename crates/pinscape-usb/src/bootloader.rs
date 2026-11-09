@@ -845,6 +845,11 @@ fn merge_ranges(mut v: Vec<(u32, u32)>) -> Vec<(u32, u32)> {
 pub fn plan_erase(pb: &mut Picoboot, target: EraseTarget, flash_size: Option<u32>) -> BootResult<ErasePlan> {
     let flash_size = flash_size.map(check_flash_size).transpose()?;
     let chip = pb.chip();
+    // EXIT_XIP first: on RP2040 it's what connects and initializes the flash
+    // interface after the boot ROM starts. ENTER_CMD_XIP on an uninitialized
+    // interface makes the first flash read stall the bus, and the boot ROM then
+    // stops answering every command except REBOOT (seen on hardware).
+    pb.exit_xip()?;
     pb.enter_cmd_xip()?;
     let detected = detect_flash_size(pb)?;
     let mut notes = Vec::new();
@@ -1193,6 +1198,12 @@ pub mod sim {
         pub erased: Vec<u32>,
         pub exclusive: u8,
         pub xip_exited: bool,
+        /// Whether EXIT_XIP has run since the boot ROM started. Like the real
+        /// RP2040, flash reads after ENTER_CMD_XIP hang the ROM until it has.
+        pub flash_connected: bool,
+        /// The ROM has hung (a flash read with the flash interface never
+        /// connected): every later command fails.
+        pub hung: bool,
         pub rebooted: bool,
         /// Writes that tried to set a 0 bit back to 1 (flash not erased).
         pub dirty_writes: u32,
@@ -1221,6 +1232,8 @@ pub mod sim {
                 erased: Vec::new(),
                 exclusive: 0,
                 xip_exited: false,
+                flash_connected: false,
+                hung: false,
                 rebooted: false,
                 dirty_writes: 0,
                 fail_write_at: None,
@@ -1299,6 +1312,9 @@ pub mod sim {
             use picoboot::*;
             self.log.push(c.id);
             std::thread::sleep(self.delay);
+            if self.hung {
+                return Err(crate::Error::Timeout);
+            }
             let expected_args = match c.id {
                 EXCLUSIVE_ACCESS => 1,
                 REBOOT => 12,
@@ -1315,7 +1331,10 @@ pub mod sim {
             }
             match c.id {
                 EXCLUSIVE_ACCESS => self.exclusive = c.args[0],
-                EXIT_XIP => self.xip_exited = true,
+                EXIT_XIP => {
+                    self.xip_exited = true;
+                    self.flash_connected = true;
+                }
                 ENTER_CMD_XIP => self.xip_exited = false,
                 REBOOT | REBOOT2 => self.rebooted = true,
                 FLASH_ERASE => {
@@ -1360,6 +1379,11 @@ pub mod sim {
                     if self.xip_exited {
                         // real RP2040 can't read flash with XIP off
                         return self.fail(&c, 9);
+                    }
+                    if !self.flash_connected && ofs < self.flash.len() {
+                        // XIP read through a flash interface that EXIT_XIP never set up
+                        self.hung = true;
+                        return Err(crate::Error::Timeout);
                     }
                     self.ok(&c);
                     self.expect = Expect::DataIn(self.flash[ofs..ofs + len].to_vec());
@@ -1609,6 +1633,8 @@ mod tests {
         let sim = SimPicoboot::new(MB2, 0xFF);
         sim.state().flash[0x100..0x104].copy_from_slice(&[1, 2, 3, 4]);
         let mut pb = connect(&sim, Chip::Rp2040);
+        pb.exit_xip().unwrap();
+        pb.enter_cmd_xip().unwrap();
         assert_eq!(pb.read(FLASH_START + 0x100, 4).unwrap(), vec![1, 2, 3, 4]);
     }
 
@@ -1807,6 +1833,31 @@ mod tests {
         let mut pb2 = connect(&sim, Chip::Rp2350);
         assert!(erase(&mut pb2, &plan, VERIFY_REBOOT, &mut |_| {}).is_err());
         assert!(sim.state().erased.is_empty());
+    }
+
+    #[test]
+    fn plan_erase_connects_the_flash_before_reading() {
+        // A fresh boot ROM: reading flash before EXIT_XIP hangs a real RP2040.
+        let sim = SimPicoboot::new(MB2, 0xFF);
+        sim.seed_pinscape(300_000, MB2 as u32, &[("config.main", 4096)]);
+        let mut pb = connect(&sim, Chip::Rp2040);
+        let plan = plan_erase(&mut pb, EraseTarget::Config, None).unwrap();
+        assert!(plan.fs_found);
+        let st = sim.state();
+        assert!(!st.hung);
+        let exit = st.log.iter().position(|&c| c == picoboot::EXIT_XIP).unwrap();
+        let read = st.log.iter().position(|&c| c == picoboot::READ).unwrap();
+        assert!(exit < read, "EXIT_XIP must come before the first flash read: {:?}", st.log);
+    }
+
+    #[test]
+    fn sim_hangs_on_a_flash_read_before_exit_xip() {
+        let sim = SimPicoboot::new(MB2, 0xFF);
+        let mut pb = connect(&sim, Chip::Rp2040);
+        pb.enter_cmd_xip().unwrap();
+        assert!(pb.read(FLASH_START, 256).is_err());
+        assert!(sim.state().hung);
+        assert!(pb.exit_xip().is_err(), "a hung ROM answers nothing");
     }
 
     #[test]

@@ -428,10 +428,17 @@ mismatched family IDs; config save refuses syntax errors.
 ---
 
 ## 11. Possible v2 items
-- Form-based config editing for common sections (buttons, outputs) generated from the schema.
-- Visual Pico pinout / GPIO-assignment view built from `QUERY_GPIO_CONFIG`.
-- DOF config helper (port mapping export).
-- Multi-device dashboard.
+Built (2026-11-08), merged from four parallel worktrees; tested with the simulator and
+partly on the RP2040 (see the README checklist):
+- Form-based config editing generated from the schema: **Text | Form** on the Config tabs
+  (crates/pinscape-config/src/{edit,form}.rs, ui/src/editor/FormView.tsx).
+- Visual Pico pinout / GPIO-assignment view from `QUERY_GPIO_CONFIG`: the Pinout tab
+  (crates/pinscape-protocol/src/pinout.rs, ui/src/tabs/PinoutTab.tsx).
+- DOF config helper (port mapping export): the DOF tab (src-tauri/src/dof.rs, ui/src/tabs/DofTab.tsx).
+- Multi-device dashboard: **All devices** in the sidebar (src-tauri/src/dashboard.rs,
+  ui/src/dashboard/); `PINSCAPE_MOCK=N` simulates N devices.
+
+Still open:
 - Upstream contribution of the Rust protocol crate / CLI to the PinscapePico project.
 
 ---
