@@ -9,6 +9,8 @@ app shows them in its update notice, so write entries for end users.
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-09
+
 ### Changed
 
 - The help pages (Help tab and the editor's reference pane) follow the dark theme, and switch
@@ -100,6 +102,7 @@ Windows-only Pinscape Pico GUI Config Tool.
   open" until it was replugged; devices that fail to open are now retried every 2 seconds.
 - After printing, the config editor's minimap stayed blank until the tab was switched.
 
-[Unreleased]: https://github.com/superhac/pinscape-cross/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/superhac/pinscape-cross/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/superhac/pinscape-cross/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/superhac/pinscape-cross/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/superhac/pinscape-cross/releases/tag/v0.5.0
