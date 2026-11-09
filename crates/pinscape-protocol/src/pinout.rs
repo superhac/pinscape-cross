@@ -172,7 +172,7 @@ pub fn classify(port: &GpioPort) -> Category {
         Category::Output
     } else if u.starts_with("ir rx") || u.starts_with("ir tx") {
         Category::Ir
-    } else if has(&["mma8451q", "lis3dh", "lis3dsh", "mxc6655", "mc3416", "accel"]) {
+    } else if has(&["mma8451q", "lis3dh", "lis3dsh", "mxc6655", "mc3416", "mpu6050", "accel"]) {
         Category::Accel
     } else if has(&[
         "pico adc", "ads1115", "tcd1103", "tsl1410", "tsl1412", "plunger", "vl6180x", "vcnl4010", "aedr8300", "(cha)",
@@ -439,6 +439,7 @@ mod tests {
         assert_eq!(used("MMA8451Q (Interrupt)", FUNC_SIO), Category::Accel);
         assert_eq!(used("LIS3DSH (Interrupt)", FUNC_SIO), Category::Accel);
         assert_eq!(used("MXC6655XA (Interrupt)", FUNC_SIO), Category::Accel);
+        assert_eq!(used("MPU6050 (Interrupt)", FUNC_SIO), Category::Accel);
         assert_eq!(used("TCD1103 (OS)", FUNC_NULL), Category::Plunger);
         assert_eq!(used("TSL1410R (SI)", FUNC_SIO), Category::Plunger);
         assert_eq!(used("AEDR8300 (ChA)", FUNC_SIO), Category::Plunger);

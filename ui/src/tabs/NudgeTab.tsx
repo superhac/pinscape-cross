@@ -262,9 +262,9 @@ export default function NudgeTab({ dev, visible, onStatus }: Props) {
           <p className="muted">
             The device isn't reading an accelerometer, so there's no nudge input. Pinscape Pico reads nudge data from an
             accelerometer chip declared in its JSON configuration: one of <code>lis3dh</code>, <code>lis3dsh</code>,{" "}
-            <code>mma8451q</code>, <code>mxc6655xa</code> or <code>mc3416</code> (with its I2C/SPI bus and interrupt
-            pin), plus an optional <code>nudge: {"{ … }"}</code> section that selects the <code>source</code> device and
-            maps its axes to the cabinet (<code>x: "+X"</code>, <code>y: "+Y"</code>, <code>z: "+Z"</code>).
+            <code>mma8451q</code>, <code>mxc6655xa</code>, <code>mc3416</code> or <code>mpu6050</code> (with its I2C/SPI
+            bus and interrupt pin), plus a <code>nudge: {"{ … }"}</code> section, which turns nudging on and can select
+            the <code>source</code> device and map its axes to the cabinet (<code>x: "+X"</code>, <code>y: "+Y"</code>, <code>z: "+Z"</code>).
           </p>
           <p className="muted">
             If you've configured one, check the Log tab for accelerometer errors (wrong address or bus, chip not

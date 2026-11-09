@@ -9,6 +9,12 @@ app shows them in its update notice, so write entries for end users.
 
 ## [Unreleased]
 
+### Added
+
+- **MPU-6050 accelerometer** (GY-521 boards and compatibles): the config editor knows the
+  `mpu6050` section (autocomplete, hover help, reference page), and the Pinout tab shows its
+  interrupt pin as an accelerometer pin. Needs Pinscape Pico firmware with MPU-6050 support.
+
 ## [0.5.0] - 2026-11-09
 
 First public release: a cross-platform (Windows, Linux, macOS) replacement for the
