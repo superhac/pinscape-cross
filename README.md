@@ -96,6 +96,8 @@ the simulated device (`cargo test`), unless marked otherwise.
 - [x] **All devices** dashboard with one Pico: card layout, live uptime / loop time, **Overview** opens
       that device's Overview tab, **Reboot…** asks and the card is back ~2 s later; polling stops when
       you leave it (`PINSCAPE_TRACE=1`: 4 reads/s in the background, 8/s on the dashboard, back to 4/s)
+- [x] Permission-help panel: with the udev rule removed the Pico shows "No permission to open" and the
+      help panel; after putting the rule back and replugging, the app picks it up
 
 ### Still to test
 
@@ -110,7 +112,6 @@ the simulated device (`cargo test`), unless marked otherwise.
       unit), run different firmware versions on them (mismatch); switching from the Outputs
       tab in test mode to the dashboard ends test mode, so no test-mode warning remains;
       one Pico in BOOTSEL and one "in use" (CLI open) both get cards
-- [ ] App's permission-help panel (unplug, remove the udev rule, replug) *(needs sudo)*
 - [ ] **Print…** on the Config tab on Windows and macOS (Linux done): line-numbered listing with header; app looks normal afterwards
 
 **Config form view** (no device writes needed except the last item)
