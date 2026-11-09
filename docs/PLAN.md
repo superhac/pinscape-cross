@@ -382,7 +382,7 @@ auto-update (off until a signing key is configured), version bump script, CHANGE
 releasing guide; plus the deferred items from Phases 3–5: PICOBOOT erase config / whole flash
 (+ `pinscape erase-flash`), drop a .uf2 on any tab, button event log, IR pulse CSV, PWMWorker
 reset, nudge/plunger CSV recording, saved plunger calibration with restore. Linux build
-prerequisites trimmed to what the app uses. Manual tests are listed in the README checklist.
+prerequisites trimmed to what the app uses.
 
 Original scope:
 
@@ -429,7 +429,7 @@ mismatched family IDs; config save refuses syntax errors.
 
 ## 11. Possible v2 items
 Built (2026-11-08), merged from four parallel worktrees; tested with the simulator and
-partly on the RP2040 (see the README checklist):
+partly on the RP2040:
 - Form-based config editing generated from the schema: **Text | Form** on the Config tabs
   (crates/pinscape-config/src/{edit,form}.rs, ui/src/editor/FormView.tsx).
 - Visual Pico pinout / GPIO-assignment view from `QUERY_GPIO_CONFIG`: the Pinout tab
