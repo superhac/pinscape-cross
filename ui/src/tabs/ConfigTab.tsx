@@ -4,6 +4,7 @@ import { api, Breadcrumb, DeviceSnapshot, Diagnostic, EditorRange, Template } fr
 import { confirm } from "../lib/confirm";
 import TemplatePicker from "../lib/TemplatePicker";
 import { setDirty } from "../lib/dirty";
+import { hasMixedEol, normalizeEol } from "../lib/eol";
 import ConfigEditor, { ConfigEditorHandle } from "../editor/ConfigEditor";
 import HelpPane from "../editor/HelpPane";
 import FormView from "../editor/FormView";
@@ -127,10 +128,18 @@ export default function ConfigTab({ dev, safeMode, visible, onStatus }: Props) {
       return;
     setBusy(true);
     try {
-      const t = await api.getConfig(dev.key, safeMode);
+      const raw = await api.getConfig(dev.key, safeMode);
+      // The editor can't hold mixed line endings; normalize the baseline too,
+      // so an unedited file doesn't show as changed.
+      const t = raw == null ? null : normalizeEol(raw);
       setText(t ?? "");
       setOriginal(t ?? "");
-      setMsg(t == null ? `No ${what} stored on the device yet. Start from a template or type one in.` : `Loaded ${t.length.toLocaleString()} bytes from the device.`);
+      setMsg(
+        t == null
+          ? `No ${what} stored on the device yet. Start from a template or type one in.`
+          : `Loaded ${raw!.length.toLocaleString()} bytes from the device.` +
+              (hasMixedEol(raw!) ? " The file mixed CRLF and LF line endings; the next save writes them all the same way." : ""),
+      );
       setTimeout(() => editor.current?.focus(), 0);
     } catch (e) {
       setMsg(`Load failed: ${e}`);

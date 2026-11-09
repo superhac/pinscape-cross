@@ -9,6 +9,12 @@ app shows them in its update notice, so write entries for end users.
 
 ## [Unreleased]
 
+### Fixed
+
+- A config whose lines end partly in CRLF and partly in LF (for example after editing it in
+  another program) no longer shows as unsaved as soon as it's loaded, and closing the app no
+  longer asks to discard edits you didn't make. The next save writes one kind of line ending.
+
 ## [0.6.0] - 2026-11-09
 
 ### Added

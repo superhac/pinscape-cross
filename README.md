@@ -87,26 +87,30 @@ the simulated device (`cargo test`), unless marked otherwise.
 - [x] DOF tab on a real config: unit number, Feedback Controller state and the port table
 - [x] Release workflow dry run (manual, no tag): all four builds pass and upload the `.deb`, `.rpm`,
       AppImage, `.msi`, NSIS `.exe`, `.dmg`, `.app.tar.gz` and the CLI archives; CI green on all three OSes
+- [x] Overview **Erase Config…**: confirmation, both configs show "none", reboot comes up on factory
+      defaults; the app reconnects by itself (firmware v1.0.3)
+- [x] A Pico the app can't open at first is picked up within ~2 s without replugging: tested with the
+      Pico held open by `pinscape log -f` ("In use by another program" in the sidebar), picked up 1.3 s
+      after the CLI exited. "No permission" failures go through the same retry; on Debian 13 the node
+      is root-only for only ~40 ms after a reboot, too short to hit on purpose
+- [x] **All devices** dashboard with one Pico: card layout, live uptime / loop time, **Overview** opens
+      that device's Overview tab, **Reboot…** asks and the card is back ~2 s later; polling stops when
+      you leave it (`PINSCAPE_TRACE=1`: 4 reads/s in the background, 8/s on the dashboard, back to 4/s)
 
 ### Still to test
 
 **Config & device management**
-- [ ] Overview **Erase Config…** button
-- [ ] Overview **Factory Mode**: firmware v1.0.2 ignores the request (upstream `VendorIfc.cpp` has no
-      case for `SUBCMD_RESET_FACTORY`, so the upstream Windows tool is affected too); retest when fixed upstream
-- [ ] A Pico that reboots while the app runs and is briefly "No permission to open" (udev not done yet)
-      is picked up again within ~2 s without replugging
-- [ ] Two or more Picos connected at once (selection, `--id` in the CLI)
-- [ ] **All devices** dashboard with two real Picos: both cards show live uptime/loop
-      time; clicking a card opens that device's Overview; **Reboot…** asks, and the card
-      comes back after the reboot
+- [ ] Overview **Factory Mode**: firmware v1.0.2 and v1.0.3 ignore the request (upstream `VendorIfc.cpp`
+      still has no case for `SUBCMD_RESET_FACTORY` as of upstream 43e314a, so the upstream Windows tool is
+      affected too); retest when fixed upstream
+- [ ] Two or more Picos connected at once (selection, `--id` in the CLI) *(needs a second Pico)*
+- [ ] **All devices** dashboard with two real Picos: both cards update at once, and each card's
+      **Overview** / **Reboot…** acts on its own Pico (single-Pico behaviour verified)
 - [ ] Dashboard warnings on real hardware: give two Picos the same `id.unitNum` (duplicate
       unit), run different firmware versions on them (mismatch); switching from the Outputs
       tab in test mode to the dashboard ends test mode, so no test-mode warning remains;
       one Pico in BOOTSEL and one "in use" (CLI open) both get cards
-- [ ] Dashboard with a single Pico looks fine; the dashboard stops polling when you leave
-      it (no extra USB traffic, `PINSCAPE_TRACE=1`)
-- [ ] App's permission-help panel (unplug, remove the udev rule, replug)
+- [ ] App's permission-help panel (unplug, remove the udev rule, replug) *(needs sudo)*
 - [ ] **Print…** on the Config tab on Windows and macOS (Linux done): line-numbered listing with header; app looks normal afterwards
 
 **Config form view** (no device writes needed except the last item)
