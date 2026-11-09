@@ -402,6 +402,7 @@ function Control({ f, info, ctx }: { f: FormField; info: PropInfo | null; ctx: C
       return (
         <select
           value={cur}
+          aria-label={f.name}
           disabled={d}
           onChange={(e) => {
             const v = e.target.value;
@@ -423,6 +424,7 @@ function Control({ f, info, ctx }: { f: FormField; info: PropInfo | null; ctx: C
         <label className="inline">
           <input
             type="checkbox"
+            aria-label={f.name}
             disabled={d}
             checked={f.value === true}
             onChange={(e) => ctx.run({ op: "set", path: f.path, value: e.target.checked })}
@@ -436,6 +438,7 @@ function Control({ f, info, ctx }: { f: FormField; info: PropInfo | null; ctx: C
           display={f.present ? String(f.value ?? "") : ""}
           stamp={f.raw}
           placeholder={placeholder}
+          label={f.name}
           disabled={d}
           onCommit={(v) => {
             if (!f.present && v === "") return;
@@ -453,6 +456,7 @@ function Control({ f, info, ctx }: { f: FormField; info: PropInfo | null; ctx: C
           stamp={f.raw}
           placeholder={f.control === "raw" ? (info?.typeDesc ?? "value") : placeholder}
           mono={f.control !== "numberOrString"}
+          label={f.name}
           disabled={d}
           onCommit={(v) => {
             const t = v.trim();
@@ -486,6 +490,8 @@ function TextInput(p: {
   stamp?: string;
   placeholder?: string;
   mono?: boolean;
+  /** Accessible name (the property name shown beside the box). */
+  label: string;
   disabled: boolean;
   onCommit: (v: string) => void;
 }) {
@@ -502,6 +508,7 @@ function TextInput(p: {
       className={"ff-input" + (p.mono ? " mono" : "")}
       defaultValue={p.display}
       placeholder={p.placeholder}
+      aria-label={p.label}
       disabled={p.disabled}
       spellCheck={false}
       onBlur={commit}
@@ -566,6 +573,7 @@ function ItemCard({ it, n, ctx }: { it: FormItem; n: number; ctx: Ctx }) {
               display={it.raw}
               stamp={it.raw}
               mono
+              label={`Entry #${n} value`}
               disabled={ctx.disabled}
               onCommit={(v) => v.trim() && ctx.run({ op: "setRaw", path: it.path, text: v })}
             />

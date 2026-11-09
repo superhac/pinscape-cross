@@ -14,6 +14,10 @@ app shows them in its update notice, so write entries for end users.
 - A config whose lines end partly in CRLF and partly in LF (for example after editing it in
   another program) no longer shows as unsaved as soon as it's loaded, and closing the app no
   longer asks to discard edits you didn't make. The next save writes one kind of line ending.
+- **Show the error in the text view** (and clicking a problem while the form view is showing)
+  now scrolls the error line into view; it used to end up hidden under the editor's sticky
+  header at the top.
+- Screen readers now announce each form field by its property name instead of just "edit text".
 
 ## [0.6.0] - 2026-11-09
 

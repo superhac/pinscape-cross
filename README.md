@@ -98,6 +98,19 @@ the simulated device (`cargo test`), unless marked otherwise.
       you leave it (`PINSCAPE_TRACE=1`: 4 reads/s in the background, 8/s on the dashboard, back to 4/s)
 - [x] Permission-help panel: with the udev rule removed the Pico shows "No permission to open" and the
       help panel; after putting the rule back and replugging, the app picks it up
+- [x] Config form view (driven through AT-SPI, results checked by exporting and diffing the text):
+      **Text | Form** on Config and Safe-Mode Config, remembered after a restart, text editor normal
+      afterwards; DIY template: 32 buttons, 76 outputs and the id values match the file, **expand all** /
+      **collapse all**; text, number, drop-down and check box edits each change only their own value
+      (comments, blank lines, line endings untouched) and **Save** greys out again when a value is changed
+      back; **+ Add entry** indented like its neighbours on a CRLF file and a tab-indented file;
+      **Duplicate**; **Remove** takes the label comment with it; gpio → pca9555 switches the fields and
+      marks the leftover `gp` / `pull` not valid with a working ✕; Undo / Redo buttons, Ctrl+Z / Ctrl+Y
+      inside the form, and Ctrl+Z in the text editor afterwards, one edit at a time; adding a missing
+      section (`irRx`) and a property in it; syntax-error message, **Show the error in the text view**
+      and Problems-list clicks; empty-editor message; **help** links and F1 in nested fields open the
+      reference at the right property; Dark theme, Small and Large text; Ctrl+S in the form saves with
+      the confirmation, reboot and backup
 
 ### Still to test
 
@@ -114,19 +127,8 @@ the simulated device (`cargo test`), unless marked otherwise.
       one Pico in BOOTSEL and one "in use" (CLI open) both get cards
 - [ ] **Print…** on the Config tab on Windows and macOS (Linux done): line-numbered listing with header; app looks normal afterwards
 
-**Config form view** (no device writes needed except the last item)
-- [ ] **Text | Form** switch on Config and Safe-Mode Config; choice remembered after a restart; the text editor looks normal (size, cursor) after switching back
-- [ ] Form on the DIY / Pro templates: buttons, outputs and id sections show the right values; long lists scroll smoothly; expand / collapse all
-- [ ] Change a value in the form (number, text, drop-down, check box), switch to Text: only that value changed, comments and blank lines untouched, no "unsaved" badge if changed back
-- [ ] **+ Add entry** on buttons and outputs: new entry indented like its neighbours (also on a CRLF file and a tab-indented file); **Duplicate** and **Remove** (label comment above goes with it)
-- [ ] Change a button source `type` (gpio → pca9555): fields change; leftover `gp` shown as not valid with ✕
-- [ ] Undo / Redo buttons and Ctrl+Z / Ctrl+Y (outside text boxes) undo form edits one at a time; Ctrl+Z in the text editor afterwards undoes them too
-- [ ] Add a section that isn't in the file (e.g. plunger), then a property in it
-- [ ] A file with a syntax error: the form shows the message; the button jumps to the error in the text view; Problems-list clicks switch to the text view
-- [ ] Empty editor: the form says so and points to templates / text view
-- [ ] **help** links open the reference pane at the right property; F1-style help in nested fields
-- [ ] Dark theme and Small / Large text size in the form
-- [ ] Ctrl+S in the form view saves (same checks, confirmation and backup as the text view); saving to the device works after form edits
+**Config form view**
+- [ ] Pro template in the form (DIY checked); long lists (76 outputs with **expand all**) scroll smoothly, judged by eye
 
 **Outputs** (needs an output wired, e.g. an LED + resistor on GP3)
 - [ ] Set a logical port level from the slider and 0/255 buttons

@@ -53,6 +53,10 @@ const ConfigEditor = forwardRef<ConfigEditorHandle, Props>(function ConfigEditor
       const e = editor.current;
       if (!e) return;
       const r = toRange(d.range);
+      // Coming from the form view the editor was hidden and still thinks its
+      // viewport is zero high, which would put the target at the very top,
+      // under the sticky-scroll header. Measure it first.
+      e.layout();
       e.setSelection(r);
       e.revealRangeInCenterIfOutsideViewport(r);
       e.focus();
