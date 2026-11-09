@@ -295,6 +295,10 @@ impl<'a> Cx<'a> {
     // ---- text helpers ----
 
     fn line_start(&self, off: usize) -> usize {
+        // `off` on the `\n` of a `\r\n` belongs to the line that break ends
+        // (callers step back from a line start with `line_start(s - 1)`).
+        let b = self.text.as_bytes();
+        let off = if off > 0 && b.get(off) == Some(&b'\n') && b[off - 1] == b'\r' { off - 1 } else { off };
         self.text[..off].rfind(['\n', '\r']).map(|i| i + 1).unwrap_or(0)
     }
 
@@ -892,12 +896,17 @@ mod tests {
     #[test]
     fn templates_round_trip() {
         // every edit on the real templates keeps the rest of the text verbatim
-        for t in [include_str!("../../../assets/templates/DIYExpansionBoard.json"), include_str!("../../../assets/templates/ProExpansionBoard.json")] {
+        // Both line-ending styles on every platform: git gives Windows CI CRLF checkouts.
+        let templates = [include_str!("../../../assets/templates/DIYExpansionBoard.json"), include_str!("../../../assets/templates/ProExpansionBoard.json")];
+        for lf in templates.map(|t| t.replace("\r\n", "\n")) {
+            for t in [lf.clone(), lf.replace('\n', "\r\n")] {
+            let t = t.as_str();
             let a = run(t, EditOp::AddItem { path: p(&[k("outputs")]) });
             let b = run(&a, EditOp::Remove { path: p(&[k("outputs"), Seg::Index(count(&a, "outputs") - 1)]) });
             assert_eq!(b, t, "add + remove of an output restores the original text");
             let c = run(t, set(&[k("outputs"), Seg::Index(0), k("name")], serde_json::json!("Flipper")));
             assert!(crate::validate(&c).is_empty(), "{:?}", crate::validate(&c));
+            }
         }
     }
 
