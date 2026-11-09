@@ -32,8 +32,10 @@ tr -d '\r' < "$UP/Firmware/JSONConfigRef.txt" > "$WORK/JSONConfigRef.txt"
 echo "== help pages"
 mkdir -p "$HERE/assets/public/help" "$HERE/assets/schema"
 cp "$UP"/GUIConfigTool/Help/* "$HERE/assets/public/help/"
-"$WORK/schema-gen" "$WORK/JSONConfigRef.txt" "$HERE/assets/public/help/JSONConfigRef.htm" \
-    "$HERE/assets/schema/schema.json" "$WORK/ConfigSchema.h"
+# Run from $WORK with a relative input path: the generator writes the input
+# path into the page header, and a temp path would change on every sync.
+(cd "$WORK" && ./schema-gen JSONConfigRef.txt "$HERE/assets/public/help/JSONConfigRef.htm" \
+    "$HERE/assets/schema/schema.json" ConfigSchema.h)
 
 REV="$(git -C "$UP" log -1 --format='%h %ad' --date=short 2>/dev/null || echo unknown)"
 echo "$REV" > "$HERE/assets/UPSTREAM_REVISION"

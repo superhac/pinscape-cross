@@ -9,11 +9,18 @@ app shows them in its update notice, so write entries for end users.
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-09
+
 ### Added
 
 - **MPU-6050 accelerometer** (GY-521 boards and compatibles): the config editor knows the
   `mpu6050` section (autocomplete, hover help, reference page), and the Pinout tab shows its
   interrupt pin as an accelerometer pin. Needs Pinscape Pico firmware with MPU-6050 support.
+
+### Changed
+
+- The Nudge tab's "No accelerometer configured" help now says that a `nudge` section is
+  required to turn nudging on.
 
 ## [0.5.0] - 2026-11-09
 
@@ -74,5 +81,6 @@ Windows-only Pinscape Pico GUI Config Tool.
   open" until it was replugged; devices that fail to open are now retried every 2 seconds.
 - After printing, the config editor's minimap stayed blank until the tab was switched.
 
-[Unreleased]: https://github.com/superhac/pinscape-cross/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/superhac/pinscape-cross/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/superhac/pinscape-cross/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/superhac/pinscape-cross/releases/tag/v0.5.0
